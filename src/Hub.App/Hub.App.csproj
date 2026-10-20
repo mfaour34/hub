@@ -9,7 +9,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Hub</AssemblyName>
     <Product>Hub</Product>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <Company>Hub contributors</Company>
     <Copyright>Copyright (c) 2026 Hub contributors. MIT License.</Copyright>
     <Description>One tray app for your mouse, headset and audio channels.</Description>

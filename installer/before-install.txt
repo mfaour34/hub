@@ -13,5 +13,3 @@ AUDIO CHANNELS (optional)
        In its Configurator tick "Voicemeeter Input", "Voicemeeter AUX Input" and
        "Voicemeeter VAIO3 Input".
   Hub's Audio page walks you through the rest and shows what is still missing.
-
-Hub is not affiliated with Razer, Logitech, SteelSeries or VB-Audio.

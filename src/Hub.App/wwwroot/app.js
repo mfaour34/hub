@@ -849,7 +849,7 @@ async function loadSettings() {
   $("#autostart").checked = s.autostart;
   setRange($("#alertPct"), s.alertPercent); $("#alertVal").textContent = s.alertPercent + "%";
   $("#normalMode").checked = s.restoreNormalMode;
-  $("#about").textContent = `Hub ${s.version} · GPL-3.0 · not affiliated with Razer, Logitech, SteelSeries or VB-Audio.`;
+  $("#about").textContent = `Hub ${s.version} · GPL-3.0`;
   const colors = (model) => model.colors.map((c) => ({ value: c, label: c[0].toUpperCase() + c.slice(1) }));
   segmented($("#mouseColor"), colors(state.mouse.model), s.mouseColor, (v) => { state.mouseColor = v; applyModels(); saveSettings(); });
   segmented($("#headsetColor"), colors(state.headset.model), s.headsetColor, (v) => { state.headsetColor = v; applyModels(); saveSettings(); });

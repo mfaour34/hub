@@ -2,7 +2,7 @@
 ; Per-user install, no admin rights: Hub only needs HID access and per-user settings.
 
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "1.0.1"
 #endif
 #ifndef PublishDir
   #define PublishDir "..\publish"
