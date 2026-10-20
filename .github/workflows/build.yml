@@ -1,0 +1,85 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: 0.13.0
+
+      - name: Version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF#refs/tags/v}"; else v="$(grep -oP '(?<=<Version>)[^<]+' src/Hub.App/Hub.App.csproj)"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Limiter (test + build)
+        shell: bash
+        working-directory: native/hub-limiter
+        run: |
+          zig cc -O2 test_limiter.c limiter.c -o test_limiter.exe
+          ./test_limiter.exe
+          ZIG=zig ./build.sh
+
+      - name: Unit tests
+        run: dotnet test tests/Hub.Tests -c Release
+
+      - name: Publish
+        run: dotnet publish src/Hub.App -c Release -o publish -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc /Qp "/DAppVersion=${{ steps.version.outputs.version }}" installer\Hub.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem dist
+
+      - name: Smoke test (install, run, uninstall)
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist\Hub-Setup-*.exe).FullName
+          $dir = Join-Path $env:RUNNER_TEMP 'HubTest'
+          Start-Process $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SKIPWEBVIEW2CHECK=1','/TASKS=autostart',"/DIR=$dir" -Wait
+          if (-not (Test-Path "$dir\Hub.exe")) { throw 'Hub.exe was not installed' }
+          if (-not (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Hub -ErrorAction SilentlyContinue)) { throw 'autostart entry missing' }
+          $log = Join-Path $env:RUNNER_TEMP 'selftest.log'
+          $p = Start-Process "$dir\Hub.exe" -ArgumentList '--selftest',$log -Wait -PassThru
+          Get-Content $log
+          if ($p.ExitCode -ne 0) { throw "self-test exited with $($p.ExitCode)" }
+          Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
+          Start-Sleep -Seconds 3
+          if (Test-Path "$dir\Hub.exe") { throw 'uninstall left Hub.exe behind' }
+          if (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Hub -ErrorAction SilentlyContinue) { throw 'uninstall left the autostart entry' }
+          'install / run / uninstall OK'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Hub-Setup-${{ steps.version.outputs.version }}
+          path: dist/Hub-Setup-*.exe
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Hub-Setup-*.exe
+          generate_release_notes: true

@@ -1,0 +1,12 @@
+bin/
+obj/
+publish/
+dist/
+*.user
+.vs/
+.vscode/
+native/hub-limiter/*.dll
+native/hub-limiter/*.pdb
+native/hub-limiter/*.lib
+native/hub-limiter/*.exe
+native/hub-limiter/test_limiter

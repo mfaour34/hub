@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hub</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <img src="logo.svg" alt="" width="34" height="34">
+      <span>Hub</span>
+    </div>
+    <nav id="nav">
+      <button data-page="overview" class="active"><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z"/></svg>Overview</button>
+      <button data-page="mouse"><svg viewBox="0 0 24 24"><path d="M12 2a6 6 0 0 0-6 6v8a6 6 0 0 0 12 0V8a6 6 0 0 0-6-6zm0 2v5M8 9h8" fill="none" stroke-width="2"/></svg>Mouse</button>
+      <button data-page="headset"><svg viewBox="0 0 24 24"><path d="M4 14v-2a8 8 0 0 1 16 0v2M4 14h3v6H5a1 1 0 0 1-1-1zM20 14h-3v6h2a1 1 0 0 0 1-1z" fill="none" stroke-width="2"/></svg>Headset</button>
+      <button data-page="audio"><svg viewBox="0 0 24 24"><path d="M5 10v4M9 6v12M13 3v18M17 8v8M21 11v2" fill="none" stroke-width="2" stroke-linecap="round"/></svg>Audio</button>
+      <button data-page="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" fill="none" stroke-width="2" stroke-linecap="round"/></svg>Settings</button>
+    </nav>
+    <div class="side-status" id="sideStatus"></div>
+  </aside>
+
+  <main id="main">
+    <!-- OVERVIEW -->
+    <section class="page active" id="page-overview">
+      <header class="page-head"><h1>Overview</h1><p class="sub" id="vendorWarning"></p></header>
+      <div class="grid-2">
+        <div class="card device-card" id="ovMouse">
+          <div class="ring" data-ring></div>
+          <img src="mouse-generic.svg" class="mouse-img ov-art mouse" alt="">
+          <div class="device-meta">
+            <h2 id="ovMouseName">Mouse</h2>
+            <p class="muted" data-conn>—</p>
+            <div class="chips" data-chips></div>
+          </div>
+        </div>
+        <div class="card device-card" id="ovHeadset">
+          <div class="ring" data-ring></div>
+          <img src="headset-generic.svg" class="headset-img ov-art" alt="">
+          <div class="device-meta">
+            <h2 id="ovHeadsetName">Headset</h2>
+            <p class="muted" data-conn>—</p>
+            <div class="chips" data-chips></div>
+          </div>
+        </div>
+      </div>
+      <div class="card" id="ovAudio">
+        <div class="card-title">Audio</div>
+        <div id="ovAudioBody" class="muted">—</div>
+      </div>
+    </section>
+
+    <!-- MOUSE -->
+    <section class="page" id="page-mouse">
+      <header class="page-head">
+        <h1 id="mouseTitle">Mouse</h1>
+        <div class="tabs" id="mouseTabs">
+          <button data-tab="customize" class="active">Customize</button>
+          <button data-tab="performance">Performance</button>
+          <button data-tab="power">Power</button>
+          <button data-tab="calibration">Calibration</button>
+          <button data-tab="advanced">Advanced</button>
+        </div>
+      </header>
+      <div class="offline" id="mouseOffline">Mouse not connected or asleep — move it to wake it.</div>
+
+      <div class="tab active" data-tab="customize">
+        <div class="mouse-stage" data-cap="buttons">
+          <div class="callouts left" id="calloutsLeft"></div>
+          <div class="mouse-art"><img src="mouse-generic.svg" class="mouse-img" alt=""></div>
+          <div class="callouts right" id="calloutsRight"></div>
+        </div>
+        <p class="hint">Click a button label to remap it. Assignments are stored on the mouse.</p>
+      </div>
+
+      <div class="tab" data-tab="performance">
+        <div class="grid-2">
+          <div class="card" data-cap="dpiStages">
+            <div class="card-title">Sensitivity</div>
+            <p class="muted">Dots per inch for each stage. The bottom button cycles through them.</p>
+            <div class="row between"><span>Stages</span>
+              <div class="stepper"><button data-stage-dec>−</button><span id="stageCount">2</span><button data-stage-inc>+</button></div>
+            </div>
+            <div id="stages"></div>
+            <div class="row end"><button class="btn primary" id="applyStages">Apply</button></div>
+          </div>
+          <div class="card" data-cap="polling">
+            <div class="card-title">Polling rate</div>
+            <p class="muted">Reports per second. Higher rates use more battery and CPU.</p>
+            <div class="segmented" id="polling"></div>
+            <p class="hint" id="pollingNote"></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab" data-tab="power">
+        <div class="grid-2">
+          <div class="card" data-cap="battery">
+            <div class="card-title">Battery</div>
+            <div class="big-battery" id="mouseBatteryBig"></div>
+          </div>
+          <div class="card" data-cap="powerSaving">
+            <div class="card-title">Power saving</div>
+            <label class="field">Sleep after <b id="idleVal"></b>
+              <input type="range" id="idle" min="1" max="15" step="1"></label>
+            <label class="field">Low-power mode at <b id="lowVal"></b>
+              <input type="range" id="lowBattery" min="5" max="100" step="5"></label>
+            <div class="row end"><button class="btn primary" id="applyPower">Apply</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab" data-tab="calibration">
+        <div class="card narrow" data-cap="liftOff">
+          <div class="card-title">Lift-off distance</div>
+          <div class="segmented" id="liftMode">
+            <button data-mode="symmetric">Smart tracking</button>
+            <button data-mode="asymmetric">Asymmetric cut-off</button>
+          </div>
+          <div id="liftSym">
+            <label class="field">Tracking distance <b id="trackVal"></b>
+              <input type="range" id="tracking" min="1" max="3" step="1"></label>
+            <div class="scale"><span>Low</span><span>Mid</span><span>High</span></div>
+          </div>
+          <div id="liftAsym">
+            <label class="field">Lift-off <b id="liftVal"></b>
+              <input type="range" id="liftOff" min="2" max="26" step="1"></label>
+            <label class="field">Landing <b id="landVal"></b>
+              <input type="range" id="landing" min="1" max="25" step="1"></label>
+            <p class="hint">Landing must be lower than lift-off.</p>
+          </div>
+          <div class="row end"><button class="btn primary" id="applyLift">Apply</button></div>
+        </div>
+      </div>
+
+      <div class="tab" data-tab="advanced">
+        <div class="card" data-cap="dynamicSensitivity">
+          <div class="row between">
+            <div class="card-title">Dynamic sensitivity</div>
+            <label class="switch"><input type="checkbox" id="dynEnabled"><span></span></label>
+          </div>
+          <p class="muted">Acceleration computed by the mouse firmware: the output/input ratio as a function of hand speed.</p>
+          <div class="segmented wide" id="dynMode">
+            <button data-mode="0">Classic</button><button data-mode="1">Natural</button>
+            <button data-mode="2">Jump</button><button data-mode="3">Custom</button>
+          </div>
+          <div class="curve-wrap">
+            <canvas id="curve" width="1100" height="320"></canvas>
+          </div>
+          <div class="row between">
+            <span class="hint" id="curveHint">Drag the points in Custom mode.</span>
+            <button class="btn primary" id="applyDyn">Apply</button>
+          </div>
+        </div>
+        <div class="card narrow" data-cap="rotation">
+          <div class="row between">
+            <div class="card-title">Rotation</div>
+            <label class="switch"><input type="checkbox" id="rotEnabled"><span></span></label>
+          </div>
+          <p class="muted">Rotate the sensor angle so horizontal swipes stay horizontal with your grip.</p>
+          <div class="rotate-demo"><img src="mouse-generic.svg" class="mouse-img" id="rotImg" alt=""></div>
+          <label class="field">Angle <b id="rotVal"></b>
+            <input type="range" id="rotAngle" min="-44" max="44" step="1"></label>
+          <div class="row end"><button class="btn primary" id="applyRot">Apply</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- HEADSET -->
+    <section class="page" id="page-headset">
+      <header class="page-head"><h1 id="headsetTitle">Headset</h1><p class="sub" id="headsetSub"></p></header>
+      <div class="offline" id="headsetOffline">Headset is off or the dongle is unplugged.</div>
+      <div class="card hero">
+        <div class="hero-art"><img src="headset-generic.svg" class="headset-img" alt=""></div>
+        <div class="hero-meta">
+          <div data-hcap="battery"><div class="card-title">Battery</div>
+          <div class="big-battery" id="headsetBatteryBig"></div></div>
+          <div class="chips" id="headsetChips"></div>
+        </div>
+      </div>
+      <div class="grid-2 wide-left">
+        <div class="stack">
+        <div class="card eq-unsupported" id="eqUnsupported">
+          <div class="card-title">Equalizer</div>
+          <p class="muted">This headset's onboard EQ uses a band layout Hub hasn't been verified with, so it isn't changed from here. Use the Audio page's EQ instead.</p>
+        </div>
+        <div class="card" data-hcap="eq">
+          <div class="card-title">Equalizer <span class="tag">on the headset</span></div>
+          <div class="chips selectable" id="eqPresets"></div>
+          <div class="eq" id="eqBands"></div>
+          <div class="row between">
+            <button class="btn ghost" id="eqSaveAs">Save as preset…</button>
+            <div class="row">
+              <button class="btn" id="eqTry">Try</button>
+              <button class="btn primary" id="eqSave">Save to headset</button>
+            </div>
+          </div>
+        </div>
+        </div>
+        <div class="stack">
+          <div class="card">
+            <div class="card-title">Mic & monitoring</div>
+            <label class="field" data-hcap="sidetone">Sidetone <b id="sideVal"></b>
+              <input type="range" id="sidetone" min="0" max="100" step="1"></label>
+            <div class="row between" data-hcap="noiseReduction"><span>Onboard noise reduction</span>
+              <label class="switch"><input type="checkbox" id="nr"><span></span></label></div>
+            <p class="hint">Mute is the boom button; mic level is the Windows input volume.</p>
+          </div>
+          <div class="card" data-hcap="sleep">
+            <div class="card-title">Auto power-off</div>
+            <div class="segmented" id="sleep"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- AUDIO -->
+    <section class="page" id="page-audio">
+      <header class="page-head"><h1>Audio</h1><p class="sub">Game, Chat and Media channels with their own EQ, a limiter and ChatMix, on VoiceMeeter Potato + Equalizer APO.</p></header>
+      <div class="card setup" id="audioSetup"></div>
+      <div class="card" id="chatMixCard">
+        <div class="row between"><div class="card-title">ChatMix</div><span class="muted" id="chatMixVal"></span></div>
+        <div class="chatmix"><span>Game</span><input type="range" id="chatMix" min="-100" max="100" step="1"><span>Chat</span></div>
+      </div>
+      <div class="card" id="ioCard">
+        <div class="row between"><div class="card-title">Output &amp; mic</div><span class="muted">Where Game, Chat and Media play, and which mic Windows uses</span></div>
+        <div class="io-grid">
+          <label class="field">Output device<select id="ioOutput"></select></label>
+          <label class="field">Microphone<select id="ioMic"></select></label>
+        </div>
+      </div>
+      <div class="channels" id="channels"></div>
+      <div class="grid-2 audio-extra">
+        <div class="card" id="appsCard">
+          <div class="row between"><div class="card-title">Apps</div><span class="muted">Where each app plays</span></div>
+          <p class="muted">Apps appear here while they make sound. Pick a channel once — Windows remembers it.</p>
+          <div id="apps"></div>
+        </div>
+        <div class="card" id="tidyCard">
+          <div class="card-title">Tidy up sound devices</div>
+          <p class="muted">VoiceMeeter adds many devices to Windows. Hub only uses three, renamed <b>Game</b>, <b>Chat</b> and <b>Media</b>.</p>
+          <div id="tidy"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="page" id="page-settings">
+      <header class="page-head"><h1>Settings</h1></header>
+      <div class="card narrow">
+        <div class="row between"><span>Start Hub with Windows</span>
+          <label class="switch"><input type="checkbox" id="autostart"><span></span></label></div>
+        <label class="field">Battery alert at or below <b id="alertVal"></b>
+          <input type="range" id="alertPct" min="5" max="50" step="5"></label>
+        <div class="row between" id="mouseColorRow" hidden><span>Mouse colour</span>
+          <div class="segmented" id="mouseColor"></div></div>
+        <div class="row between" id="headsetColorRow" hidden><span>Headset colour</span>
+          <div class="segmented" id="headsetColor"></div></div>
+        <div class="row between"><span>Return the mouse to onboard mode when its vendor app is closed</span>
+          <label class="switch"><input type="checkbox" id="normalMode"><span></span></label></div>
+      </div>
+      <p class="hint about" id="about"></p>
+    </section>
+  </main>
+
+  <dialog class="adv" id="adv">
+    <form method="dialog" class="adv-body" id="advForm" novalidate>
+      <header class="adv-head">
+        <div>
+          <div class="muted" id="advChannel"></div>
+          <h2 id="advTitle"></h2>
+        </div>
+        <button type="button" class="icon-btn" data-close title="Close">✕</button>
+      </header>
+      <div class="adv-lock" id="advLock">
+        <span><b>Built-in preset — read-only.</b> Copy it to a custom profile to change anything.</span>
+        <button type="button" class="btn primary" id="advCopy">Copy to custom profile</button>
+      </div>
+      <label class="field adv-name" id="advNameRow">Profile name
+        <input type="text" id="advName" maxlength="60" spellcheck="false"></label>
+      <div class="adv-graph"><canvas id="advCurve" width="1240" height="260"></canvas></div>
+      <fieldset class="adv-grid" id="advFields">
+        <div class="adv-section">
+          <div class="card-title">Render chain</div>
+          <label class="field">Gain before EQ <b id="advGainVal"></b>
+            <input type="range" id="advGain" min="-12" max="12" step="0.5"></label>
+          <div class="row between"><span>Limiter <small class="muted">look-ahead, stops anything above 0 dBFS after the EQ</small></span>
+            <label class="switch"><input type="checkbox" id="advLimiter"><span></span></label></div>
+          <div class="row between"><span>Auto headroom <small class="muted">lower the gain by the EQ's peak boost</small></span>
+            <label class="switch"><input type="checkbox" id="advHeadroom"><span></span></label></div>
+          <div class="field">Processing sample rate</div>
+          <div class="segmented" id="advRate"></div>
+          <p class="hint" id="advChainHint"></p>
+        </div>
+        <div class="adv-section">
+          <div class="row between"><div class="card-title">Filters</div>
+            <button type="button" class="btn ghost small" id="advAdd">+ Add filter</button></div>
+          <div class="filters" id="advFilters"></div>
+        </div>
+      </fieldset>
+      <footer class="row between adv-foot">
+        <p class="adv-error" id="advError"></p>
+        <button type="button" class="btn danger ghost" id="advDelete">Delete profile</button>
+        <div class="row">
+          <button type="button" class="btn" data-close>Cancel</button>
+          <button type="button" class="btn primary" id="advSave">Save &amp; apply</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <div class="popover" id="popover"></div>
+  <div class="toast" id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>

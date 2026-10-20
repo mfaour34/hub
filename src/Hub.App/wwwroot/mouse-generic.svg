@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 154 307">
+  <defs>
+    <linearGradient id="shell" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3b4154"/><stop offset=".55" stop-color="#22262f"/><stop offset="1" stop-color="#15181f"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx=".35" cy=".25" r=".7">
+      <stop offset="0" stop-color="#fff" stop-opacity=".16"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6d5bff"/><stop offset="1" stop-color="#1ec8e8"/>
+    </linearGradient>
+  </defs>
+  <!-- body -->
+  <path d="M77 3C38 3 12 30 9 78L8 205c0 58 31 99 69 99s69-41 69-99l-1-127C142 30 116 3 77 3z" fill="url(#shell)"/>
+  <path d="M77 3C38 3 12 30 9 78L8 205c0 58 31 99 69 99s69-41 69-99l-1-127C142 30 116 3 77 3z" fill="url(#sheen)"/>
+  <path d="M77 3C38 3 12 30 9 78L8 205c0 58 31 99 69 99s69-41 69-99l-1-127C142 30 116 3 77 3z" fill="none" stroke="#4b5266" stroke-width="1.5"/>
+  <!-- button split -->
+  <path d="M77 6v120" stroke="#0f1117" stroke-width="2.5"/>
+  <path d="M12 118c20 10 42 13 65 13s45-3 65-13" fill="none" stroke="#0f1117" stroke-width="2.5"/>
+  <!-- wheel -->
+  <rect x="66" y="34" width="22" height="50" rx="11" fill="#0f1117"/>
+  <rect x="70" y="39" width="14" height="40" rx="7" fill="#2b3040"/>
+  <g stroke="#454c60" stroke-width="2">
+    <path d="M71 46h12M71 52h12M71 58h12M71 64h12M71 70h12"/>
+  </g>
+  <!-- dpi indicator -->
+  <rect x="71" y="91" width="12" height="4" rx="2" fill="url(#accent)"/>
+  <!-- side buttons (left) -->
+  <rect x="4" y="128" width="7" height="34" rx="3" fill="#2a2f3c" stroke="#4b5266"/>
+  <rect x="4" y="168" width="7" height="34" rx="3" fill="#2a2f3c" stroke="#4b5266"/>
+  <!-- logo mark -->
+  <circle cx="77" cy="236" r="12" fill="none" stroke="url(#accent)" stroke-width="2.5" opacity=".7"/>
+</svg>

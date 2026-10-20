@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 628 800">
+  <defs>
+    <linearGradient id="shell" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3b4154"/><stop offset=".6" stop-color="#22262f"/><stop offset="1" stop-color="#14171e"/>
+    </linearGradient>
+    <linearGradient id="band" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f3444"/><stop offset="1" stop-color="#1b1f28"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6d5bff"/><stop offset="1" stop-color="#1ec8e8"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx=".35" cy=".3" r=".7">
+      <stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- headband -->
+  <path d="M96 400V310C96 150 196 52 314 52s218 98 218 258v90" fill="none" stroke="url(#band)" stroke-width="54" stroke-linecap="round"/>
+  <path d="M120 330C126 186 208 92 314 92s188 94 194 238" fill="none" stroke="#454c60" stroke-width="4" stroke-dasharray="2 10" stroke-linecap="round"/>
+  <!-- yokes -->
+  <rect x="78" y="350" width="36" height="70" rx="12" fill="#2a2f3c"/>
+  <rect x="514" y="350" width="36" height="70" rx="12" fill="#2a2f3c"/>
+  <!-- ear cups -->
+  <g>
+    <rect x="22" y="396" width="190" height="270" rx="92" fill="url(#shell)"/>
+    <rect x="22" y="396" width="190" height="270" rx="92" fill="url(#sheen)"/>
+    <rect x="22" y="396" width="190" height="270" rx="92" fill="none" stroke="#4b5266" stroke-width="3"/>
+    <rect x="182" y="420" width="44" height="222" rx="22" fill="#14171e"/>
+  </g>
+  <g>
+    <rect x="416" y="396" width="190" height="270" rx="92" fill="url(#shell)"/>
+    <rect x="416" y="396" width="190" height="270" rx="92" fill="url(#sheen)"/>
+    <rect x="416" y="396" width="190" height="270" rx="92" fill="none" stroke="#4b5266" stroke-width="3"/>
+    <rect x="402" y="420" width="44" height="222" rx="22" fill="#14171e"/>
+    <circle cx="511" cy="531" r="46" fill="none" stroke="url(#accent)" stroke-width="5" opacity=".75"/>
+  </g>
+  <!-- mic boom -->
+  <path d="M96 610c-6 70 30 128 130 150" fill="none" stroke="#2a2f3c" stroke-width="16" stroke-linecap="round"/>
+  <rect x="220" y="736" width="64" height="40" rx="20" fill="#14171e" stroke="#4b5266" stroke-width="3"/>
+</svg>
