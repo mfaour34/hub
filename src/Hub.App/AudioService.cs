@@ -332,7 +332,7 @@ public sealed class AudioService : IDisposable
             else if (File.Exists(config) && File.ReadAllText(config).Contains("# Managed by Hub")) { File.WriteAllText(config, ""); done.Add("Equalizer APO config cleared"); }
             var hubDir = Path.Combine(dir, "hub");
             foreach (var f in Directory.Exists(hubDir) ? Directory.GetFiles(hubDir) : [])
-                try { File.Delete(f); } catch (IOException) { /* the limiter DLL stays until the audio engine restarts */ }
+                try { File.Delete(f); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { /* the limiter DLL stays until the audio engine restarts */ }
         }
         if (_settings.HiddenEndpoints.Count > 0) { ShowHiddenDevices(); done.Add("hidden sound devices shown"); }
         var endpoints = AudioEndpoints.List();
