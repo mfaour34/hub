@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hub aim lab</title>
+  <link rel="stylesheet" href="aim.css">
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <div class="hud" id="hud" hidden>
+    <span id="hudMode"></span><span id="hudInfo"></span><span class="muted">esc · menu</span>
+  </div>
+
+  <div class="paused" id="paused" hidden>
+    <div class="panel small">
+      <div class="card-title">paused</div>
+      <p class="muted" id="pausedText">The round is on hold; time and clicks don't count until you're back.</p>
+      <div class="row"><button class="btn primary" id="resume">resume</button><button class="btn" id="quitRound">end round</button></div>
+    </div>
+  </div>
+
+  <div class="paused" id="interlude" hidden>
+    <div class="panel small">
+      <div class="card-title" id="interludeTitle"></div>
+      <p class="muted" id="interludeText"></p>
+      <div class="row"><button class="btn primary" id="interludeGo">start</button><button class="btn" id="interludeQuit">stop</button></div>
+    </div>
+  </div>
+
+  <div class="menu" id="menu">
+    <div class="panel">
+      <header class="row between">
+        <div class="brand">hub<span>.</span> aim lab</div>
+        <button class="btn ghost" id="close">close</button>
+      </header>
+      <p class="warn" id="accelWarn" hidden>Your mouse's dynamic sensitivity (acceleration) is on. The same hand movement turns more when you move fast, so cm/360 and the finder's result won't match a game.</p>
+
+      <section>
+        <div class="card-title">setup</div>
+        <div class="setup">
+          <label>game<select id="game"></select></label>
+          <label>sensitivity<input id="sens" type="number" step="0.001" min="0"></label>
+          <label>dpi<input id="dpi" type="number" step="50" min="50"></label>
+          <div class="readout"><b id="cm360">—</b><small>cm / 360°</small></div>
+          <div class="readout"><b id="edpi">—</b><small>edpi</small></div>
+        </div>
+        <p class="hint" id="gameNote"></p>
+      </section>
+
+      <section>
+        <div class="card-title">train</div>
+        <div class="modes">
+          <button class="mode" data-mode="flick"><b>flick</b><small>30 targets, one at a time: get on them fast without overshooting</small></button>
+          <button class="mode" data-mode="track"><b>track</b><small>30 seconds keeping the crosshair on a strafing target</small></button>
+          <button class="mode" data-mode="finder"><b>find my sensitivity</b><small>10 short flick rounds comparing two settings each time; about 3 minutes</small></button>
+        </div>
+      </section>
+
+      <section id="resultsSection" hidden>
+        <div class="card-title">results</div>
+        <div id="results"></div>
+      </section>
+
+      <section>
+        <div class="row between"><div class="card-title">convert</div><span class="hint">from the setup above</span></div>
+        <div id="convert" class="convert"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="themes.js"></script>
+  <script src="aim.js"></script>
+</body>
+</html>

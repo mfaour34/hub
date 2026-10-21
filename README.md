@@ -124,6 +124,8 @@ Closing the window frees WebView2 completely. Hub then goes back to one small pr
 | PC specs, live CPU/GPU load and GPU temperature (copyable) | — | ✅ System page, no driver |
 | 7-day log of GPU resets, hardware (WHEA) errors, blue screens and unexpected restarts | — | ✅ System page, from Windows' own logs |
 | USB devices plugged in now, and a 7-day plug/unplug timeline | — | ✅ System page |
+| Mouse test: real polling rate, steadiness, switch chatter (double-click) detection | — | ✅ Mouse page |
+| Aim lab: flick and tracking trainer, sensitivity finder, converter for 14 FPS games | — | ✅ own window, runs only while open |
 | RGB lighting, macros recorded in-app, cloud profiles | all | ❌ not planned: F13–F24 mapping covers macros through your own tools |
 | Virtual 7.1 surround (HRTF) | GG Sonar, G HUB | ❌ |
 

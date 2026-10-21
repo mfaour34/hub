@@ -145,6 +145,7 @@ function renderMouseTest(t) {
 }
 $("#mtThreshold").addEventListener("input", () => ($("#mtThresholdVal").textContent = $("#mtThreshold").value + " ms"));
 $("#mtThresholdVal").textContent = "30 ms";
+$("#aimLaunch").addEventListener("click", () => act("Aim lab", () => call("aim.launch"), null));
 $("#mtReset").addEventListener("click", () => call("mouse.test.reset").catch(() => {}));
 // the pad swallows clicks so testing never presses a control; raw input still sees every press
 ["mousedown", "mouseup", "click", "auxclick", "contextmenu"].forEach((ev) => $("#mtPad").addEventListener(ev, (e) => e.preventDefault()));

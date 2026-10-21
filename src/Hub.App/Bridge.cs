@@ -134,6 +134,7 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
                 }
                 return null;
             }
+            case "aim.launch": await LaunchAim(); return null;
             case "mouse.test.start": StartMouseTest(); return null;
             case "mouse.test.stop": StopMouseTest(); return null;
             case "mouse.test.reset": _mouseTest?.ResetClicks(); return null;
@@ -303,6 +304,29 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
 
     // ---------------- helpers ----------------
 
+    /// <summary>
+    /// Starts the aim lab as its own process (it brings itself forward if already open), telling it the mouse's
+    /// active DPI and whether its onboard acceleration is on, so its cm/360 maths can warn about it.
+    /// </summary>
+    async Task LaunchAim()
+    {
+        int? dpi = null; bool? accel = null;
+        if (devices.Mouse is { } m)
+            try
+            {
+                await Task.Run(() =>
+                {
+                    var stages = m.GetDpiStages();
+                    dpi = stages.Stages.ElementAtOrDefault(stages.ActiveStage - 1)?.X;
+                    if (devices.MouseCaps?.DynamicSensitivity == true) accel = m.GetDynamicSensitivityEnabled();
+                }).WaitAsync(TimeSpan.FromSeconds(3));
+            }
+            catch (Exception) { /* asleep: the aim lab asks for the DPI */ }
+        var screen = Screen.FromPoint(Cursor.Position).DeviceName;
+        var args = $"--aim --monitor \"{screen}\"" + (dpi is { } d ? $" --dpi {d}" : "") + (accel == true ? " --accel 1" : "");
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!, args) { UseShellExecute = false });
+    }
+
     RawMouse? _mouseTest;
     long _mouseTestRead;
     System.Threading.Timer? _mouseTestWatchdog;
@@ -392,7 +416,10 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
         Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1) is 0;
 
     /// <summary>The page's appearance settings as JSON, injected before the page's first paint so it starts in its theme.</summary>
-    public string AppearanceJson() => JsonSerializer.Serialize(new
+    public string AppearanceJson() => AppearanceJson(settings);
+
+    /// <summary>Also used by the aim lab's process, which has settings but no bridge of this kind.</summary>
+    public static string AppearanceJson(AppSettings settings) => JsonSerializer.Serialize(new
     {
         theme = ThemeTokens.IsPreset(settings.Theme) ? settings.Theme : ThemeTokens.DefaultPreset,
         customTheme = ThemeTokens.Sanitize(settings.CustomTheme),
