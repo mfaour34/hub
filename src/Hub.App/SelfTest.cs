@@ -77,7 +77,7 @@ static class SelfTest
         return failures == 0 ? 0 : 1;
     }
 
-    /// <summary>`Hub.exe --audiotest [log]`: the read-only part of Configure routing, step by step.</summary>
+    /// <summary>`Hub.exe --audiotest [log]`: read-only state of Hub audio (no defaults or devices are changed).</summary>
     public static int RunAudio(string logPath)
     {
         using var log = new StreamWriter(logPath, append: false);
@@ -88,45 +88,17 @@ static class SelfTest
             var settings = AppSettings.Load();
             var audio = new AudioService(settings);
             var s = audio.GetStatus();
-            Line($"status: voicemeeter={s.VoiceMeeter} eapo={s.Eapo} routed={s.Routed} steps=[{string.Join(" | ", s.Steps)}]");
-            foreach (var e in AudioEndpoints.List().Where(e => e.Active && (e.Name.Contains("Voicemeeter", StringComparison.OrdinalIgnoreCase) || e.Name.Contains("PRO X 2"))))
-                Line($"  endpoint {(e.IsRender ? "out" : "in ")} {e.Name} {e.Guid} eapo={e.HasEqualizerApo}");
+            Line($"status: on={settings.AudioRouted} running={s.Running} output={s.Output} sink={s.Sink} blocker={s.Blocker ?? "-"}");
+            foreach (var c in AudioService.Channels)
+                Line($"  {c.Name}: {audio.ActivePreset(c.Channel).Name} limiter={audio.ActiveChain(c.Channel).Limiter} volume={audio.Volume(c.Channel)}");
+            foreach (var e in audio.OutputChoices()) Line($"  output choice {e.Name}");
             foreach (var app in audio.Apps()) Line($"  app {app.Name} channel={app.Channel ?? "-"} playing={app.Playing}");
-            foreach (var sess in AudioSessions.List().Take(3)) Line($"  override pid {sess.ProcessId} {sess.ProcessName}: {AudioSessions.GetAppOutput(sess.ProcessId) ?? "(follows default)"}");
-            foreach (var e in audio.UnusedDevices()) Line($"  unused {e.Name}");
-            Line($"dll: {VoiceMeeter.DllPath()}");
-            using var vm = new VoiceMeeter();
-            Line($"login ok, type={vm.Type} (3 = Potato)");
-            foreach (var (type, name) in vm.OutputDevices) Line($"  vm output type={type} {name}");
-            Line($"Strip[5].Gain={vm.Get("Strip[5].Gain")} Bus[0].Gain={vm.Get("Bus[0].Gain")}");
             Line("RESULT: ok");
             return 0;
         }
         catch (Exception ex)
         {
             Line($"FAIL: {ex}");
-            return 1;
-        }
-    }
-
-    /// <summary>`Hub.exe --tidy [log]`: runs exactly what the "Rename &amp; hide" button runs, logging any exception in full.</summary>
-    public static int RunTidy(string logPath)
-    {
-        using var log = new StreamWriter(logPath, append: false);
-        try
-        {
-            var settings = AppSettings.Load();
-            var audio = new AudioService(settings);
-            log.WriteLine("rename…"); log.Flush();
-            audio.RenameChannelDevices();
-            log.WriteLine("hide…"); log.Flush();
-            log.WriteLine($"hidden {audio.HideUnusedDevices()}");
-            log.WriteLine("RESULT: ok");
-            return 0;
-        }
-        catch (Exception ex)
-        {
-            log.WriteLine($"FAIL: {ex}");
             return 1;
         }
     }

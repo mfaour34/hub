@@ -63,12 +63,21 @@ The EQ write carries the band list plus biquad coefficients for the headset's 48
 
 ## Audio channels
 
-Hub doesn't use a custom driver. Its audio pipeline is:
+Hub doesn't use a custom driver or third-party audio software. Its audio pipeline is:
 
 ```
-apps → Game / Chat / Media (VoiceMeeter Potato virtual inputs 5–7)
-     → Equalizer APO on each input: preamp → filters → hub-limiter (VST2, look-ahead)
-     → VoiceMeeter bus A1 (WDM, exclusive) → your headphones
+apps → Windows default playback device = a silent sink (Steam Streaming Speakers, shown as "Hub (Hub Audio)")
+     → per-process loopback capture (ActivateAudioInterfaceAsync on VAD\Process_Loopback, include process tree)
+     → per-app drift-tracking resampler → Game / Chat / Media
+     → per channel: 2× oversampling → preamp + biquads → look-ahead limiter → back to 48 kHz → volume × ChatMix
+     → WASAPI shared, event-driven render (raw mode where offered) → your headphones
 ```
 
-Hub writes Equalizer APO's `config.txt` with one `Device:` block per channel, matched by endpoint GUID, and keeps a backup that the uninstaller restores. It sets VoiceMeeter through the official Remote API, and default devices and sample rates through `IPolicyConfig`, like EarTrumpet does. Per-app routing uses `IAudioPolicyConfigFactory`, the API behind Windows' *App volume and device preferences* page.
+- **Sink.** Windows' console, multimedia and communications defaults point at the sink while Hub audio is on. Its own volume and mute are read once a second and applied to the mix, so the volume keys still work. Without Steam's device Hub uses another unused playback device and mutes it. Hub renames the sink's endpoint (`PKEY_Device_DeviceDesc` and `PKEY_DeviceInterface_FriendlyName`, no admin rights needed) and restores the saved names on stop, exit, crash or uninstall.
+- **Capture.** Only sessions on the sink are captured. A child process is skipped when its parent is already captured with its tree. Muting an app's session or setting it to 0 stops its capture too, as Windows applies session volume before the loopback tap.
+- **Clocks.** Each app stream has its own buffer; a PI controller steers a 32-tap Kaiser-windowed sinc resampler (128 phases) to hold about 10 ms of backlog, so devices on different clocks never drift into gaps or overflow.
+- **Rates.** Capture and render run at 48 kHz so Windows converts nothing; a 63-tap Kaiser halfband takes each channel to 96 kHz and back (flat to 20 kHz within 0.01 dB, images below −80 dB).
+- **Real time.** The audio thread is registered with MMCSS ("Pro Audio"); the UI changes it only through lock-free command queues.
+- **Tame loud sounds.** Lowers the limiter's threshold by 0–12 dB on a channel: peaks above it (gunshots, explosions) come down by that much, quieter sounds pass unchanged.
+
+Default devices go through `IPolicyConfig`, like EarTrumpet does. Apps that were sent to a specific device by Windows' *App volume and device preferences* page (`IAudioPolicyConfigFactory`) are put back on the default when you assign them a channel.

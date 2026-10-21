@@ -218,30 +218,25 @@
 
     <!-- AUDIO -->
     <section class="page" id="page-audio">
-      <header class="page-head"><h1>Audio</h1><p class="sub">Game, Chat and Media channels with their own EQ, a limiter and ChatMix, on VoiceMeeter Potato + Equalizer APO.</p></header>
+      <header class="page-head"><h1>Audio</h1><p class="sub">Game, Chat and Media channels with their own EQ, a limiter and ChatMix, processed by Hub itself.</p></header>
       <div class="card setup" id="audioSetup"></div>
       <div class="card" id="chatMixCard">
         <div class="row between"><div class="card-title">ChatMix</div><span class="muted" id="chatMixVal"></span></div>
         <div class="chatmix"><span>Game</span><input type="range" id="chatMix" min="-100" max="100" step="1"><span>Chat</span></div>
       </div>
       <div class="card" id="ioCard">
-        <div class="row between"><div class="card-title">Output &amp; mic</div><span class="muted">Where Game, Chat and Media play, and which mic Windows uses</span></div>
+        <div class="row between"><div class="card-title">Output &amp; mic</div><span class="muted">Where Hub plays the mix, and which mic Windows uses</span></div>
         <div class="io-grid">
           <label class="field">Output device<select id="ioOutput"></select></label>
           <label class="field">Microphone<select id="ioMic"></select></label>
         </div>
       </div>
       <div class="channels" id="channels"></div>
-      <div class="grid-2 audio-extra">
+      <div class="audio-extra">
         <div class="card" id="appsCard">
           <div class="row between"><div class="card-title">Apps</div><span class="muted">Where each app plays</span></div>
-          <p class="muted">Apps appear here while they make sound. Pick a channel once — Windows remembers it.</p>
+          <p class="muted">Apps appear here while they make sound. Pick a channel once — Hub remembers it.</p>
           <div id="apps"></div>
-        </div>
-        <div class="card" id="tidyCard">
-          <div class="card-title">Tidy up sound devices</div>
-          <p class="muted">VoiceMeeter adds many devices to Windows. Hub only uses three, renamed <b>Game</b>, <b>Chat</b> and <b>Media</b>.</p>
-          <div id="tidy"></div>
         </div>
       </div>
     </section>

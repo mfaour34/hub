@@ -8,6 +8,7 @@ public sealed class TrayContext : ApplicationContext
     readonly AppSettings _settings = AppSettings.Load();
     readonly DeviceManager _devices;
     readonly AudioService _audio;
+    readonly System.Windows.Forms.Timer _audioRetry;
     readonly Bridge _bridge;
     readonly NotifyIcon _tray;
     readonly Icon _appIcon;
@@ -47,15 +48,13 @@ public sealed class TrayContext : ApplicationContext
         Refresh();
         _devices.Start();
 
-        // Apply the saved audio mix once VoiceMeeter is up (it is started by Windows at logon).
-        // and refresh the Equalizer APO files, so EQ/limiter updates from a new Hub version reach the audio engine.
-        _ = Native.Sta.Run(() =>
-        {
-            if (!_audio.GetStatus().Routed) return;
-            try { _audio.ApplySampleRates(); } catch (Exception) { }
-            try { _audio.WriteEqualizerApo(); } catch (Exception) { }
-            try { _audio.ApplyFaders(); } catch (Exception) { }
-        });
+        // Hub audio comes back with Hub; if the output device isn't there yet (headset off at logon) keep trying.
+        _ = Native.Sta.Run(() => { _audio.MigrateFromVoiceMeeter(); _audio.Resume(); });
+        _audioRetry = new System.Windows.Forms.Timer { Interval = 5000 };
+        _audioRetry.Tick += (_, _) => { if (_audio.WaitingToResume) _ = Native.Sta.Run(_audio.Resume); };
+        _audioRetry.Start();
+        // logging off or shutting down: give Windows its output device back, Hub sets the sink again at next start
+        Microsoft.Win32.SystemEvents.SessionEnding += (_, _) => Native.Sta.Run(_audio.Shutdown).Wait(3000);
 
         var vendors = DeviceManager.RunningVendorApps();
         if (vendors.Count > 0)
@@ -156,8 +155,9 @@ public sealed class TrayContext : ApplicationContext
         _tray.Visible = false;
         _tray.Dispose();
         _window?.Close();
+        _audioRetry.Dispose();
         _devices.Dispose();
-        _audio.Dispose();
+        Native.Sta.Run(_audio.Dispose).Wait(5000); // the default-device switch needs an STA thread
         base.ExitThreadCore();
     }
 }

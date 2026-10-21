@@ -531,10 +531,9 @@ async function loadAudio() {
   setRange($("#chatMix"), Math.round(audio.chatMix * 100)); updateChatMixLabel();
   $("#channels").replaceChildren(...audio.channels.map(renderChannel));
   audio.channels.forEach((c) => drawResponse(c));
-  const routed = audio.status.routed;
-  $("#appsCard").classList.toggle("disabled", !routed);
-  $("#tidyCard").classList.toggle("disabled", !routed);
-  if (routed) { loadApps(); loadTidy(); }
+  const running = audio.status.running;
+  $("#appsCard").classList.toggle("disabled", !running);
+  if (running) loadApps();
   loadIo();
 }
 
@@ -547,15 +546,12 @@ async function loadIo() {
       h("option", { value: "", ...(!chosen ? { selected: "" } : {}) }, autoLabel + (current && !chosen ? ` — ${current.name}` : "")),
       ...items.map((it) => h("option", { value: it.id, ...(chosen && it.id === current?.id ? { selected: "" } : {}) }, it.name)));
   };
-  const outputs = io.outputs.map((n) => ({ id: n, name: n }));
-  fill($("#ioOutput"), outputs, io.output ? { id: io.output, name: io.output } : null, io.outputChosen, "Automatic");
-  const mics = io.mics;
-  fill($("#ioMic"), mics, mics.find((m) => m.id === io.mic) || null, io.micChosen, "Windows default");
-  $("#ioCard").classList.toggle("disabled", !audio.status.voicemeeter);
+  fill($("#ioOutput"), io.outputs, io.outputs.find((o) => o.id === io.output) || null, io.outputChosen, "Automatic");
+  fill($("#ioMic"), io.mics, io.mics.find((m) => m.id === io.mic) || null, io.micChosen, "Windows default");
 }
 $("#ioOutput").addEventListener("change", (e) => act("Output", async () => {
-  await call("audio.setOutput", { name: e.target.value || null }); await loadIo();
-}, e.target.value ? `Output: ${e.target.value}` : "Output: automatic"));
+  await call("audio.setOutput", { id: e.target.value || null }); await loadAudio();
+}, e.target.value ? `Output: ${e.target.selectedOptions[0].textContent}` : "Output: automatic"));
 $("#ioMic").addEventListener("change", (e) => act("Microphone", async () => {
   await call("audio.setMic", { id: e.target.value || null }); await loadIo();
 }, "Default microphone set"));
@@ -574,50 +570,38 @@ async function loadApps() {
       segmented(seg, [{ value: "game", label: "Game" }, { value: "chat", label: "Chat" }, { value: "media", label: "Media" }], a.channel,
         (channel) => act(a.name, () => call("audio.assignApp", { name: a.name, channel }), `${a.name} → ${channel[0].toUpperCase() + channel.slice(1)}`));
       return h("div", { class: "app-row" },
-        h("span", { class: "name" }, h("i", { class: a.playing ? "on" : "" }), a.name, a.channel ? null : h("small", { class: "muted" }, " (other device)")),
+        h("span", { class: "name" }, h("i", { class: a.playing ? "on" : "" }), a.name, a.channel ? null : h("small", { class: "muted" }, " (plays to another device)")),
         seg);
     }));
   } catch (err) { /* transient: sessions come and go */ }
   appsTimer = setTimeout(loadApps, 4000);
 }
 
-// ----- device tidy-up
-async function loadTidy() {
-  const d = await call("audio.devices");
-  const box = $("#tidy");
-  box.replaceChildren(...[
-    d.unused.length
-      ? h("div", {}, h("p", {}, `${d.unused.length} unused VoiceMeeter devices can be hidden:`),
-          h("ul", { class: "tidy-list" }, ...d.unused.map((n) => h("li", {}, n))))
-      : h("p", { class: "hint" }, "No unused VoiceMeeter devices are visible."),
-    h("div", { class: "row end" },
-      d.hidden ? h("button", { class: "btn ghost", onclick: () => act("Devices", async () => { await call("audio.unhide"); await loadTidy(); }, "Hidden devices are visible again") }, `Show ${d.hidden} hidden`) : null,
-      h("button", { class: "btn primary", onclick: () => act("Devices", async () => {
-        const n = await call("audio.tidy");
-        await loadTidy();
-        return n;
-      }, "Devices renamed and unused ones hidden") }, d.unused.length ? `Rename & hide ${d.unused.length}` : "Rename to Game / Chat / Media")),
-  ].filter(Boolean));
-}
-
+// ----- on/off and health
 function renderAudioSetup() {
-  const s = audio.status, ready = s.voicemeeter && s.eapo && s.routed;
+  const s = audio.status;
   const card = $("#audioSetup");
-  card.classList.toggle("show", !ready);
-  $("#chatMixCard").classList.toggle("disabled", !s.voicemeeter);
-  const item = (ok, text) => h("span", { class: ok ? "ok" : "" }, text);
+  card.classList.add("show");
+  const state = s.running ? "On" : s.on ? "Waiting" : "Off";
+  const detail = s.running
+    ? `Apps play to ${s.sink} (silent), Hub mixes them and plays to ${s.output}.`
+    : s.on ? (s.blocker || "Starting…")
+    : "Windows plays straight to your output device. Turn on to get Game, Chat and Media channels with EQ and ChatMix.";
   card.replaceChildren(...[
-    h("div", { class: "card-title" }, "Finish audio setup"),
-    h("div", { class: "status" }, item(s.voicemeeter, "VoiceMeeter Potato"), item(s.eapo, "Equalizer APO on the VoiceMeeter inputs"), item(s.routed, "Routing to your output device")),
-    h("ol", {}, ...s.steps.map((t) => h("li", {}, t))),
-    audioError ? h("p", { class: "setup-error" }, "Routing failed: " + audioError) : null,
-    s.voicemeeter ? h("div", { class: "row end" }, h("button", { class: "btn primary", onclick: async (e) => {
-      e.currentTarget.disabled = true;
-      e.currentTarget.textContent = "Configuring…";
-      try { await call("audio.setup"); audioError = null; toast("Audio routing configured"); }
-      catch (err) { audioError = err.message; }
-      await loadAudio();
-    } }, "Configure routing")) : null,
+    h("div", { class: "row between" },
+      h("div", { class: "card-title" }, "Hub audio ", h("span", { class: "tag" }, state)),
+      s.running || s.on
+        ? h("button", { class: "btn ghost", onclick: () => act("Hub audio", async () => { await call("audio.stop"); await loadAudio(); }, "Hub audio off") }, "Turn off")
+        : h("button", { class: "btn primary", ...(s.blocker ? { disabled: "" } : {}), onclick: async (e) => {
+            e.currentTarget.disabled = true;
+            try { await call("audio.start"); audioError = null; toast("Hub audio on"); }
+            catch (err) { audioError = err.message; }
+            await loadAudio();
+          } }, "Turn on")),
+    h("p", { class: "muted" }, detail),
+    !s.running && !s.on && s.blocker ? h("p", { class: "setup-error" }, s.blocker) : null,
+    s.problem ? h("p", { class: "setup-error" }, s.problem) : null,
+    audioError ? h("p", { class: "setup-error" }, audioError) : null,
   ].filter(Boolean));
 }
 
@@ -647,12 +631,23 @@ function renderChannel(c) {
     clearTimeout(t);
     t = setTimeout(() => call("audio.setVolume", { channel: c.id, value: vol.value / 100 }).catch((e) => toast(e.message, true)), 60);
   });
+  const tame = h("input", { type: "range", min: 0, max: c.maxTame, step: 1 });
+  setRange(tame, c.tame);
+  const tameText = (db) => (db > 0 ? `−${db} dB` : "Off");
+  const tameVal = h("b", {}, tameText(c.tame));
+  let tt;
+  tame.addEventListener("input", () => {
+    tameVal.textContent = tameText(+tame.value);
+    clearTimeout(tt);
+    tt = setTimeout(() => call("audio.setTame", { channel: c.id, value: +tame.value }).then(() => (c.tame = +tame.value)).catch((e) => toast(e.message, true)), 150);
+  });
   const dot = h("i"); dot.style.background = CH_COLORS[c.id];
   const active = c.filters.filter((f) => f.enabled).length;
   return h("div", { class: "card channel", "data-ch": c.id },
     h("h2", {}, dot, c.name, c.custom ? h("span", { class: "badge-custom" }, "Custom") : null),
-    h("p", { class: "muted" }, c.device),
     h("label", { class: "field" }, "Volume ", volVal, vol),
+    h("label", { class: "field", title: "Turns down sudden loud sounds such as gunshots and explosions; quieter sounds like footsteps stay as they are" },
+      "Tame loud sounds ", tameVal, tame),
     c.presets.length > 12 ? search : null,
     h("div", { class: "preset-row" }, select,
       h("button", { class: "btn small", title: "EQ filters, gain, limiter and sample rate", onclick: () => openAdvanced(c.id) }, "Advanced")),

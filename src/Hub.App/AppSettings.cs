@@ -62,15 +62,24 @@ public sealed class AppSettings
     /// <summary>Channel name → the user's custom profiles (built-in presets are read-only).</summary>
     public Dictionary<string, List<CustomAudioPreset>> CustomAudioPresets { get; set; } = [];
     public Dictionary<string, double> AudioVolumes { get; set; } = [];
+    /// <summary>Per channel, how far below full scale the limiter holds loud peaks, in dB (0 = only above full scale).</summary>
+    public Dictionary<string, double> AudioTame { get; set; } = [];
     public double ChatMix { get; set; }
+    /// <summary>Hub's audio engine is on: apps play to the sink device and Hub plays the mix to <see cref="AudioOutput"/>.</summary>
     public bool AudioRouted { get; set; }
-    /// <summary>VoiceMeeter output device name for A1; null = Windows' default playback device when routing is set up.</summary>
+    /// <summary>Output endpoint id Hub plays the mix to; null = Windows' default playback device when Hub audio is turned on.</summary>
     public string? AudioOutput { get; set; }
+    /// <summary>The silent device apps play to while Hub captures them; null = picked automatically.</summary>
+    public string? SinkEndpoint { get; set; }
+    /// <summary>The sink's own name while Hub has renamed it: [endpoint id, description, interface name].</summary>
+    public string[]? SinkOriginalName { get; set; }
+    /// <summary>Process name (lower case) → channel id, the user's per-app choices.</summary>
+    public Dictionary<string, string> AppChannels { get; set; } = [];
     /// <summary>Capture endpoint id made the default mic; null = leave Windows' default microphone alone.</summary>
     public string? MicEndpoint { get; set; }
-    /// <summary>Channel id → endpoint GUID of its VoiceMeeter input (kept so renaming the device doesn't lose it).</summary>
+    /// <summary>Hub 1.0 (VoiceMeeter routing): channel id → endpoint GUID of its VoiceMeeter input; cleared by the migration.</summary>
     public Dictionary<string, string> ChannelEndpoints { get; set; } = [];
-    /// <summary>Endpoint ids Hub disabled via "Hide unused devices", so they can be shown again.</summary>
+    /// <summary>Hub 1.0 (VoiceMeeter routing): endpoint ids hidden by "Hide unused devices", shown again by the migration.</summary>
     public List<string> HiddenEndpoints { get; set; } = [];
 
     /// <summary>%APPDATA%\Hub, or HUB_DATA_DIR (portable installs, development, screenshots).</summary>

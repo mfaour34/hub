@@ -7,9 +7,10 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>Hub</AssemblyName>
     <Product>Hub</Product>
-    <Version>1.0.1</Version>
+    <Version>1.1.0</Version>
     <Company>Hub contributors</Company>
     <Copyright>Copyright (c) 2026 Hub contributors. MIT License.</Copyright>
     <Description>One tray app for your mouse, headset and audio channels.</Description>
@@ -38,7 +39,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="..\..\assets\Hub.ico" LogicalName="Hub.App.Hub.ico" />
-    <Content Include="..\..\native\hub-limiter\hub-limiter.dll" Link="hub-limiter.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\native\hub-limiter\hub-dsp.dll" Link="hub-dsp.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="wwwroot\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 

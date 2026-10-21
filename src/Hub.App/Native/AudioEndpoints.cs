@@ -116,20 +116,44 @@ public static class AudioEndpoints
         finally { Marshal.ReleaseComObject(config); }
     }
 
-    /// <summary>Renames an endpoint (its device description, the "Speakers" part of "Speakers (PRO X 2)").</summary>
-    public static void Rename(string endpointId, string name)
+    /// <summary>An endpoint's two name parts: "Speakers" and "USB Headset" of "Speakers (USB Headset)".</summary>
+    public static (string Description, string Interface) Names(string endpointId)
+    {
+        var guid = endpointId[(endpointId.LastIndexOf('.') + 1)..];
+        var kind = endpointId.StartsWith("{0.0.0.", StringComparison.Ordinal) ? "Render" : "Capture";
+        using var props = Registry.LocalMachine.OpenSubKey($@"{Root}\{kind}\{guid}\Properties");
+        return (props?.GetValue(DeviceDesc) as string ?? "", props?.GetValue(InterfaceName) as string ?? "");
+    }
+
+    /// <summary>
+    /// Renames an endpoint, like renaming it in the Sound control panel (description) plus the device part in
+    /// brackets (interface name, when given). Works without admin rights.
+    /// </summary>
+    public static void Rename(string endpointId, string description, string? interfaceName = null)
     {
         var enumerator = NewEnumerator();
         Marshal.ThrowExceptionForHR(enumerator.GetDevice(endpointId, out var device));
         Marshal.ThrowExceptionForHR(device.OpenPropertyStore(2 /* STGM_READWRITE */, out var store));
-        var key = new PropertyKey { FormatId = new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"), PropertyId = 2 }; // PKEY_Device_DeviceDesc
-        var value = new PropVariant { VarType = 31 /* VT_LPWSTR */, Pointer = Marshal.StringToCoTaskMemUni(name) };
         try
         {
-            Marshal.ThrowExceptionForHR(store.SetValue(ref key, ref value));
+            Set(store, new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"), 2, description); // PKEY_Device_DeviceDesc
+            if (interfaceName is not null)
+                Set(store, new Guid("b3f8fa53-0004-438e-9003-51a46e139bfc"), 6, interfaceName); // PKEY_DeviceInterface_FriendlyName
             Marshal.ThrowExceptionForHR(store.Commit());
         }
-        finally { Marshal.FreeCoTaskMem(value.Pointer); }
+        finally
+        {
+            Marshal.ReleaseComObject(store);
+            Marshal.ReleaseComObject(device);
+        }
+
+        static void Set(IPropertyStore store, Guid format, int id, string text)
+        {
+            var key = new PropertyKey { FormatId = format, PropertyId = id };
+            var value = new PropVariant { VarType = 31 /* VT_LPWSTR */, Pointer = Marshal.StringToCoTaskMemUni(text) };
+            try { Marshal.ThrowExceptionForHR(store.SetValue(ref key, ref value)); }
+            finally { Marshal.FreeCoTaskMem(value.Pointer); }
+        }
     }
 
     [StructLayout(LayoutKind.Sequential)] struct PropertyKey { public Guid FormatId; public int PropertyId; }

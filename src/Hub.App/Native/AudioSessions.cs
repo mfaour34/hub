@@ -14,7 +14,9 @@ public static class AudioSessions
     const int ERender = 0, DeviceStateActive = 1, ClsctxAll = 23;
     static readonly Guid IidSessionManager2 = new("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F");
 
-    public static List<AudioSession> List()
+    /// <param name="endpointGuid">Only this playback device's sessions (all devices when null).</param>
+    /// <param name="names">Process-name cache by pid, so a poll doesn't open every process again.</param>
+    public static List<AudioSession> List(string? endpointGuid = null, Dictionary<int, string>? names = null)
     {
         var result = new List<AudioSession>();
         var enumerator = NewEnumerator();
@@ -25,6 +27,7 @@ public static class AudioSessions
             devices.Item(i, out var device);
             device.GetId(out var id);
             var guid = id[(id.LastIndexOf('.') + 1)..];
+            if (endpointGuid is not null && !guid.Equals(endpointGuid, StringComparison.OrdinalIgnoreCase)) { Marshal.ReleaseComObject(device); continue; }
             var iid = IidSessionManager2;
             if (device.Activate(ref iid, ClsctxAll, IntPtr.Zero, out var obj) != 0) continue;
             var manager = (IAudioSessionManager2)obj;
@@ -34,14 +37,26 @@ public static class AudioSessions
             {
                 sessions.GetSession(s, out var control);
                 if (control is not IAudioSessionControl2 c2) continue;
-                if (c2.IsSystemSoundsSession() == 0) continue; // S_OK means it is the system sounds session
-                c2.GetProcessId(out int pid);
-                c2.GetState(out int state);
-                string name;
-                try { name = Process.GetProcessById(pid).ProcessName; } catch (ArgumentException) { continue; }
-                result.Add(new AudioSession(pid, name, guid, state == 1));
+                try
+                {
+                    if (c2.IsSystemSoundsSession() == 0) continue; // S_OK means it is the system sounds session
+                    c2.GetProcessId(out int pid);
+                    c2.GetState(out int state);
+                    if (names is null || !names.TryGetValue(pid, out var name))
+                    {
+                        try { name = Process.GetProcessById(pid).ProcessName; } catch (ArgumentException) { continue; }
+                        if (names is not null) names[pid] = name;
+                    }
+                    result.Add(new AudioSession(pid, name, guid, state == 1));
+                }
+                finally { Marshal.ReleaseComObject(control); }
             }
+            Marshal.ReleaseComObject(sessions);
+            Marshal.ReleaseComObject(manager);
+            Marshal.ReleaseComObject(device);
         }
+        Marshal.ReleaseComObject(devices);
+        Marshal.ReleaseComObject(enumerator);
         return result;
     }
 

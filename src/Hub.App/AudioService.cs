@@ -1,33 +1,43 @@
+using Hub.App.Engine;
 using Hub.App.Native;
 using Hub.Core.Audio;
+using Hub.Core.Audio.Engine;
 using Microsoft.Win32;
 
 namespace Hub.App;
 
 /// <summary>
-/// Game/Chat/Media audio channels: VoiceMeeter Potato virtual inputs (strips 5/6/7) routed to the chosen output,
-/// each with an Equalizer APO config generated from its preset. Volume × ChatMix → strip faders.
+/// Game/Chat/Media audio channels with no driver or third-party software: while Hub audio is on, Windows' default
+/// playback devices point at a silent "sink" device, every app playing there is captured (per-process loopback),
+/// mixed into Game/Chat/Media with each channel's EQ and limiter, and played to the output device by
+/// <see cref="AudioEngine"/>. Turning it off (or quitting Hub) points Windows back at the output device.
 /// </summary>
 public sealed class AudioService : IDisposable
 {
-    public sealed record ChannelDef(AudioChannel Channel, string Id, string Name, int Strip, string EndpointName);
+    public sealed record ChannelDef(AudioChannel Channel, string Id, string Name);
 
     public static readonly ChannelDef[] Channels =
     [
-        new(AudioChannel.Game, "game", "Game", 5, "Voicemeeter Input"),
-        new(AudioChannel.Chat, "chat", "Chat", 6, "Voicemeeter AUX Input"),
-        new(AudioChannel.Media, "media", "Media", 7, "Voicemeeter VAIO3 Input"),
+        new(AudioChannel.Game, "game", "Game"),
+        new(AudioChannel.Chat, "chat", "Chat"),
+        new(AudioChannel.Media, "media", "Media"),
     ];
 
     /// <summary>
-    /// HUB_DRY_RUN=1: never touch Windows audio, VoiceMeeter or Equalizer APO (development and screenshots while
-    /// another Hub owns the real setup). Reads still work.
+    /// HUB_DRY_RUN=1: never touch Windows audio (development and screenshots while another Hub owns the real setup).
+    /// Reads still work.
     /// </summary>
     public static readonly bool DryRun = Environment.GetEnvironmentVariable("HUB_DRY_RUN") == "1";
 
     readonly AppSettings _settings;
     readonly Dictionary<AudioChannel, ChannelPresets> _presets;
-    VoiceMeeter? _vm;
+    readonly object _gate = new();
+    AudioEngine? _engine;
+    AppWatcher? _watcher;
+    Thread? _poller;
+    volatile bool _stopPolling;
+    string? _sinkId;
+    bool _sinkVirtual;
 
     public AudioService(AppSettings settings)
     {
@@ -37,48 +47,25 @@ public sealed class AudioService : IDisposable
 
     // ---------------- status ----------------
 
-    public sealed record Status(bool VoiceMeeter, bool Eapo, bool Routed, List<string> Steps);
-
-    static string? EapoConfigDir()
-    {
-        using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\EqualizerAPO");
-        var dir = key?.GetValue("ConfigPath") as string
-                  ?? (key?.GetValue("InstallPath") is string install ? Path.Combine(install, "config") : null);
-        return dir is not null && Directory.Exists(dir) ? dir : null;
-    }
-
-    /// <summary>
-    /// The VoiceMeeter input carrying a channel. Found by its original name the first time, then remembered by GUID,
-    /// so it survives being renamed to "Game"/"Chat"/"Media".
-    /// </summary>
-    AudioEndpoint? Endpoint(List<AudioEndpoint> all, ChannelDef c)
-    {
-        if (_settings.ChannelEndpoints.TryGetValue(c.Id, out var guid)
-            && all.FirstOrDefault(e => e.IsRender && e.Guid == guid) is { } known)
-            return known.Active ? known : null;
-        var found = all.FirstOrDefault(e => e.IsRender && e.Active && e.Name.StartsWith(c.EndpointName + " (", StringComparison.OrdinalIgnoreCase));
-        if (found is not null)
-        {
-            _settings.ChannelEndpoints[c.Id] = found.Guid;
-            _settings.Save();
-        }
-        return found;
-    }
+    /// <param name="Blocker">Why Hub audio can't run right now (null when it can).</param>
+    public sealed record Status(bool Running, string? Output, string? Sink, string? Blocker, string? Problem);
 
     public Status GetStatus()
     {
         var endpoints = AudioEndpoints.List();
-        bool vm = VoiceMeeter.IsPotatoInstalled() && Channels.All(c => Endpoint(endpoints, c) is not null);
-        bool eapoInstalled = EapoConfigDir() is not null;
-        bool eapoOnInputs = eapoInstalled && Channels.All(c => Endpoint(endpoints, c)?.HasEqualizerApo == true);
-        var steps = new List<string>();
-        if (!vm) steps.Add("Install VoiceMeeter Potato (vb-audio.com/Voicemeeter/potato.htm) as administrator, then reboot.");
-        if (!eapoInstalled) steps.Add("Install Equalizer APO (sourceforge.net/projects/equalizerapo).");
-        if (eapoInstalled && !eapoOnInputs)
-            steps.Add("In Equalizer APO's Configurator tick Voicemeeter Input, Voicemeeter AUX Input and Voicemeeter VAIO3 Input, then reboot.");
-        if (vm && !_settings.AudioRouted) steps.Add("Press “Configure routing” below.");
-        return new Status(vm, eapoOnInputs, vm && _settings.AudioRouted, steps);
+        var output = ResolveOutput(endpoints);
+        var sink = ResolveSink(endpoints, output?.Id);
+        string? blocker =
+            !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041) ? "Needs Windows 10 version 2004 or newer (per-app audio capture)."
+            : OtherMixerRunning() ? "SteelSeries Sonar is running and owns the Windows sound devices. Quit it first."
+            : output is null ? "No output device found. Connect your headphones or pick an output below."
+            : sink is null ? "Hub needs a second playback device to use as its silent input (Steam Streaming Speakers, which Steam installs, is ideal)."
+            : null;
+        string? problem = _engine?.OutputError is { } e ? $"Output device: {e}" : _watcher?.LastError is { } w ? $"Couldn't capture {w}" : null;
+        return new Status(_engine is not null, output?.Name, sink?.Name, blocker, problem);
     }
+
+    static bool OtherMixerRunning() => System.Diagnostics.Process.GetProcessesByName("SteelSeriesSonar").Length > 0;
 
     // ---------------- presets ----------------
 
@@ -92,15 +79,16 @@ public sealed class AudioService : IDisposable
         _settings.CustomAudioPresets.TryGetValue(ch.ToString(), out var list) ? list : [];
 
     /// <summary>
-    /// How a channel is rendered: Game/Media run the EQ at full gain into the look-ahead limiter at 96 kHz (more
-    /// headroom for the filters and limiter); Chat stays at 48 kHz with automatic headroom.
+    /// How a channel is rendered: Game/Media run the EQ at full gain into the look-ahead limiter; Chat gets
+    /// automatic headroom instead. Every channel is processed at 96 kHz (see <see cref="AudioEngine.DspRate"/>).
     /// </summary>
     public sealed record Chain(bool Limiter, bool AutoHeadroom, int SampleRate);
 
     public static Chain DefaultChain(AudioChannel ch) =>
-        ch == AudioChannel.Chat ? new(false, true, 48000) : new(true, true, HighSampleRate);
+        ch == AudioChannel.Chat ? new(false, true, AudioEngine.DspRate) : new(true, true, AudioEngine.DspRate);
 
-    public static readonly int[] SampleRates = [44100, 48000, 96000, 192000];
+    /// <summary>Hub's engine runs every channel's EQ at 96 kHz; profiles from Hub 1.0 may name another rate.</summary>
+    public static readonly int[] SampleRates = [AudioEngine.DspRate];
 
     string ActiveName(AudioChannel ch) =>
         _settings.AudioPresets.GetValueOrDefault(ch.ToString()) ?? _presets.GetValueOrDefault(ch)?.DefaultName ?? "Flat";
@@ -117,7 +105,7 @@ public sealed class AudioService : IDisposable
     }
 
     public Chain ActiveChain(AudioChannel ch) =>
-        ActiveCustom(ch) is { } c ? new(c.Limiter, c.AutoHeadroom, c.SampleRate) : DefaultChain(ch);
+        ActiveCustom(ch) is { } c ? new(c.Limiter, c.AutoHeadroom, AudioEngine.DspRate) : DefaultChain(ch);
 
     public void SetPreset(AudioChannel ch, string name)
     {
@@ -125,7 +113,7 @@ public sealed class AudioService : IDisposable
             throw new ArgumentException($"No preset “{name}”");
         _settings.AudioPresets[ch.ToString()] = name;
         _settings.Save();
-        ApplyAll();
+        ApplyBuses();
     }
 
     /// <summary>
@@ -141,11 +129,11 @@ public sealed class AudioService : IDisposable
         var list = CustomPresets(ch);
         if (list.Any(p => p.Name.Equals(preset.Name, StringComparison.OrdinalIgnoreCase) && p.Name != originalName))
             throw new ArgumentException($"A custom profile called “{preset.Name}” already exists");
-        if (!SampleRates.Contains(preset.SampleRate)) throw new ArgumentException($"Unsupported sample rate {preset.SampleRate}");
+        preset.SampleRate = AudioEngine.DspRate;
         if (preset.Filters.Count > 20) throw new ArgumentException("At most 20 filters");
         foreach (var f in preset.Filters)
         {
-            if (f.Frequency < 10 || f.Frequency >= preset.SampleRate / 2.0) throw new ArgumentException($"Filter frequency {f.Frequency} Hz is out of range");
+            if (f.Frequency < 10 || f.Frequency >= 24000) throw new ArgumentException($"Filter frequency {f.Frequency} Hz is out of range");
             if (f.Q is < 0.05 or > 50) throw new ArgumentException($"Q {f.Q} is out of range (0.05–50)");
             if (Math.Abs(f.GainDb) > 24) throw new ArgumentException($"Filter gain {f.GainDb} dB is out of range (±24)");
         }
@@ -156,7 +144,7 @@ public sealed class AudioService : IDisposable
         _settings.CustomAudioPresets[ch.ToString()] = list;
         _settings.AudioPresets[ch.ToString()] = preset.Name;
         _settings.Save();
-        ApplyAll();
+        ApplyBuses();
     }
 
     /// <summary>Removes a custom profile; if it was active the channel goes back to its default preset.</summary>
@@ -166,83 +154,183 @@ public sealed class AudioService : IDisposable
         if (list.RemoveAll(p => p.Name == name) == 0) throw new ArgumentException($"No custom profile “{name}”");
         if (_settings.AudioPresets.GetValueOrDefault(ch.ToString()) == name) _settings.AudioPresets.Remove(ch.ToString());
         _settings.Save();
-        ApplyAll();
+        ApplyBuses();
     }
 
-    void ApplyAll()
+    // ---------------- engine ----------------
+
+    /// <summary>Turns Hub audio on and remembers it, so it comes back with Hub.</summary>
+    public void Start()
     {
-        WriteEqualizerApo();
-        ApplySampleRates();
+        if (DryRun) return;
+        if (GetStatus().Blocker is { } b) throw new InvalidOperationException(b);
+        // remember where the user was listening: once Hub runs, Windows' default is the sink
+        _settings.AudioOutput ??= ResolveOutput(AudioEndpoints.List())?.Id;
+        _settings.AudioRouted = true;
+        _settings.Save();
+        Resume();
+    }
+
+    /// <summary>Turns Hub audio off: Windows plays straight to the output device again.</summary>
+    public void Stop()
+    {
+        _settings.AudioRouted = false;
+        _settings.Save();
+        Shutdown();
+        if (!DryRun) RestoreSinkName(_settings); // also when the engine wasn't running (Hub killed while it was on)
+    }
+
+    /// <summary>Starts the engine if Hub audio is on (at Hub start-up). Does nothing while something blocks it.</summary>
+    public void Resume()
+    {
+        lock (_gate)
+        {
+            if (DryRun || _engine is not null || !_settings.AudioRouted) return;
+            var endpoints = AudioEndpoints.List();
+            var output = ResolveOutput(endpoints);
+            if (output is null || OtherMixerRunning()) return;
+            var sink = ResolveSink(endpoints, output.Id);
+            if (sink is null) return;
+            _sinkId = sink.Id;
+            _sinkVirtual = IsVirtualSink(sink.Name);
+
+            PrepareSink(sink);
+            if (_sinkVirtual) NameSink(sink.Id);
+            _engine = new AudioEngine(output.Id);
+            ApplyBuses();
+            ApplyFaders();
+            _engine.Start();
+            _watcher = new AppWatcher(_engine, sink.Guid, name => AppChannels.For(name, _settings.AppChannels),
+                name => !IgnoredProcesses.Contains(name));
+            // apps follow the Windows defaults to the sink; voice apps use the communications role
+            AudioEndpoints.SetDefault(sink.Id, AudioEndpoints.Role.Console, AudioEndpoints.Role.Multimedia, AudioEndpoints.Role.Communications);
+            _stopPolling = false;
+            _poller = new Thread(Poll) { IsBackground = true, Name = "Hub audio apps" };
+            _poller.SetApartmentState(ApartmentState.STA);
+            _poller.Start();
+        }
+    }
+
+    /// <summary>Stops the engine and points Windows back at the output device (Hub exiting or audio turned off).</summary>
+    public void Shutdown()
+    {
+        lock (_gate)
+        {
+            if (_engine is null) return;
+            _stopPolling = true;
+            _poller?.Join(3000);
+            _poller = null;
+            _engine.Dispose();
+            _engine = null;
+            _watcher = null;
+            RestoreDefaults(_settings);
+        }
     }
 
     /// <summary>
-    /// Game and Media devices run at 96 kHz by default, so EQ and limiter run there too: filter shapes near the top of
-    /// the audible band stay accurate and the limiter sees inter-sample peaks. Apps' 48 kHz audio is upsampled by Windows.
+    /// Windows defaults back on the output device. Also called from the crash handler: without Hub running, apps
+    /// left on the silent sink would play into nothing.
     /// </summary>
-    public const int HighSampleRate = 96000;
-
-    /// <summary>Puts each channel's Windows device at its active profile's rate (no-op when already there).</summary>
-    public void ApplySampleRates()
+    public static void RestoreDefaults(AppSettings settings)
     {
         if (DryRun) return;
+        RestoreSinkName(settings);
         var endpoints = AudioEndpoints.List();
-        foreach (var c in Channels)
-            if (Endpoint(endpoints, c) is { } ep) AudioEndpoints.SetSampleRate(ep.Id, ActiveChain(c.Channel).SampleRate);
+        if (ResolveOutput(endpoints, settings) is not { } output) return;
+        AudioEndpoints.SetDefault(output.Id, AudioEndpoints.Role.Console, AudioEndpoints.Role.Multimedia, AudioEndpoints.Role.Communications);
     }
 
-    /// <summary>Writes hub\{game,chat,media}.txt and the Device-scoped include block in config.txt.</summary>
-    public void WriteEqualizerApo()
+    /// <summary>Gives the virtual sink Hub's name, remembering its own so <see cref="RestoreDefaults"/> can put it back.</summary>
+    void NameSink(string sinkId)
     {
-        if (DryRun) return;
-        var dir = EapoConfigDir();
-        if (dir is null) return;
-        var endpoints = AudioEndpoints.List();
-        Directory.CreateDirectory(Path.Combine(dir, "hub"));
-        var limiter = InstallLimiter(dir);
-        foreach (var c in Channels)
-        {
-            var chain = ActiveChain(c.Channel);
-            File.WriteAllText(Path.Combine(dir, "hub", $"{c.Id}.txt"),
-                ActivePreset(c.Channel).ToEqualizerApo(chain.Limiter ? limiter : null, chain.AutoHeadroom, chain.SampleRate));
-        }
-
-        var config = Path.Combine(dir, "config.txt");
-        var backup = config + ".before-hub";
-        if (File.Exists(config) && !File.Exists(backup)) File.Copy(config, backup);
-        var lines = new List<string> { "# Managed by Hub — Game/Chat/Media EQ. Edits here are overwritten." };
-        foreach (var c in Channels)
-        {
-            if (Endpoint(endpoints, c) is not { } ep) continue;
-            lines.Add($"Device: {ep.Guid}");
-            lines.Add($@"Include: hub\{c.Id}.txt");
-        }
-        File.WriteAllLines(config, lines);
-    }
-
-    /// <summary>
-    /// Copies hub-limiter.dll next to the EQ files. audiodg runs as LOCAL SERVICE and can't read the user profile,
-    /// so the plugin must live under Program Files. Returns the path EAPO's config should reference, or null.
-    /// </summary>
-    static string? InstallLimiter(string configDir)
-    {
-        var source = Path.Combine(AppContext.BaseDirectory, "hub-limiter.dll");
-        if (!File.Exists(source)) return null;
-        var target = Path.Combine(configDir, "hub", "hub-limiter.dll");
         try
         {
-            if (!File.Exists(target) || !File.ReadAllBytes(target).AsSpan().SequenceEqual(File.ReadAllBytes(source)))
-                File.Copy(source, target, overwrite: true);
+            var names = AudioEndpoints.Names(sinkId);
+            if (names == (SinkDescription, SinkInterface)) return;
+            if (_settings.SinkOriginalName?[0] != sinkId)
+            {
+                _settings.SinkOriginalName = [sinkId, names.Description, names.Interface];
+                _settings.Save();
+            }
+            AudioEndpoints.Rename(sinkId, SinkDescription, SinkInterface);
         }
-        catch (IOException) when (File.Exists(target))
+        catch (Exception) { /* cosmetic: the engine works under the device's own name */ }
+    }
+
+    /// <summary>Puts the sink's own name back (Hub audio off, Hub exiting or crashing).</summary>
+    static void RestoreSinkName(AppSettings settings)
+    {
+        if (settings.SinkOriginalName is not [var id, var description, var iface]) return;
+        try { AudioEndpoints.Rename(id, description, iface); }
+        catch (Exception) { /* the device is gone; nothing to rename */ }
+        settings.SinkOriginalName = null;
+        settings.Save();
+    }
+
+    void Poll()
+    {
+        int tick = 0;
+        while (!_stopPolling)
         {
-            // in use by audiodg; the loaded copy keeps working and is replaced on the next write
+            try
+            {
+                _watcher?.Poll();
+                MirrorSinkVolume();
+                // Steam may give its device its name back (Remote Play, reinstall)
+                if (_sinkVirtual && _sinkId is not null && ++tick % 10 == 0) NameSink(_sinkId);
+            }
+            catch (Exception) { /* device churn; next poll */ }
+            for (int i = 0; i < 8 && !_stopPolling; i++) Thread.Sleep(125); // once a second; stopping stays quick
         }
-        return target;
+    }
+
+    /// <summary>
+    /// The volume keys and the Windows volume slider change the default device, which is now the sink. Its own volume
+    /// doesn't reach the captured audio, so Hub applies it to the mix.
+    /// </summary>
+    void MirrorSinkVolume()
+    {
+        if (_engine is null || _sinkId is null) return;
+        var vol = Wasapi.Activate<Wasapi.IAudioEndpointVolume>(Wasapi.Device(_sinkId));
+        try
+        {
+            vol.GetMasterVolumeLevel(out float db);
+            vol.GetMute(out bool mute);
+            // a real device used as the sink is muted by Hub itself, so only a virtual sink's mute is the user's
+            _engine.Graph.SetMasterGain(mute && _sinkVirtual ? 0 : Math.Pow(10, db / 20));
+        }
+        finally { System.Runtime.InteropServices.Marshal.ReleaseComObject(vol); }
+    }
+
+    /// <summary>Sends each channel's EQ and limiter to the engine (preset changes, start-up).</summary>
+    void ApplyBuses()
+    {
+        if (_engine is null) return;
+        foreach (var c in Channels)
+        {
+            var preset = ActivePreset(c.Channel);
+            var chain = ActiveChain(c.Channel);
+            var eq = new EqChain(preset, AudioEngine.DspRate, EqChain.Preamp(preset, chain.Limiter, chain.AutoHeadroom, AudioEngine.DspRate));
+            double tame = Tame(c.Channel);
+            IBlockLimiter? limiter = chain.Limiter || tame > 0 ? new NativeLimiter(AudioEngine.DspRate, Math.Pow(10, -tame / 20)) : null;
+            _engine.Graph.SetBus(c.Channel, new BusSettings(eq, limiter));
+        }
+    }
+
+    public const double MaxTameDb = 12;
+
+    /// <summary>How many dB below full scale the channel's limiter holds loud peaks (gunshots, explosions).</summary>
+    public double Tame(AudioChannel ch) => _settings.AudioTame.GetValueOrDefault(ch.ToString(), 0);
+
+    public void SetTame(AudioChannel ch, double db)
+    {
+        db = Math.Clamp(Math.Round(db), 0, MaxTameDb);
+        if (db == 0) _settings.AudioTame.Remove(ch.ToString()); else _settings.AudioTame[ch.ToString()] = db;
+        _settings.Save();
+        ApplyBuses();
     }
 
     // ---------------- mixer ----------------
-
-    VoiceMeeter Vm() => _vm ??= new VoiceMeeter();
 
     public double Volume(AudioChannel ch) => _settings.AudioVolumes.GetValueOrDefault(ch.ToString(), 1.0);
 
@@ -260,145 +348,84 @@ public sealed class AudioService : IDisposable
         ApplyFaders();
     }
 
+    /// <summary>Channel volume × ChatMix as each channel's gain.</summary>
     public void ApplyFaders()
     {
-        if (DryRun) return;
-        if (!GetStatus().Routed) return;
+        if (_engine is null) return;
         var (game, chat) = ChatMix.Gains(_settings.ChatMix);
-        var vm = Vm();
         foreach (var c in Channels)
         {
             double mix = c.Channel switch { AudioChannel.Game => game, AudioChannel.Chat => chat, _ => 1 };
-            vm.Set($"Strip[{c.Strip}].Gain", (float)ChatMix.ToFaderDb(Volume(c.Channel) * mix));
+            _engine.Graph.SetBusGain(c.Channel, Volume(c.Channel) * mix);
         }
     }
 
-    /// <summary>
-    /// One-time routing: VoiceMeeter A1 = the chosen output (Windows' current default by default), virtual strips 5–7 → A1 only, labelled; Windows default playback
-    /// = Game, default communications = Chat (so voice apps land on Chat). Then EQ files and faders.
-    /// </summary>
-    public void ConfigureRouting()
-    {
-        if (DryRun) return;
-        var vm = Vm();
-        if (vm.Type != VoiceMeeter.PotatoType)
-            throw new InvalidOperationException("The running VoiceMeeter is not Potato; close it and start Voicemeeter Potato");
-        var (driver, output) = ResolveOutput(vm);
-        _settings.AudioOutput = output; // remember it: after routing, Windows' default is Hub's own Game device
-        var script = new List<string> { $"Bus[0].device.{driver}=\"{output}\";" };
-        foreach (var c in Channels)
-        {
-            script.Add($"Strip[{c.Strip}].Label=\"{c.Name}\";");
-            script.Add($"Strip[{c.Strip}].A1=1;");
-            for (int bus = 2; bus <= 5; bus++) script.Add($"Strip[{c.Strip}].A{bus}=0;");
-            for (int bus = 1; bus <= 3; bus++) script.Add($"Strip[{c.Strip}].B{bus}=0;");
-            script.Add($"Strip[{c.Strip}].Mute=0;");
-        }
-        vm.Script(string.Join("\n", script));
+    // ---------------- output, sink and mic ----------------
 
-        var endpoints = AudioEndpoints.List();
-        if (Endpoint(endpoints, Channels[0]) is { } game)
-            AudioEndpoints.SetDefault(game.Id, AudioEndpoints.Role.Console, AudioEndpoints.Role.Multimedia);
-        if (Endpoint(endpoints, Channels[1]) is { } chat)
-            AudioEndpoints.SetDefault(chat.Id, AudioEndpoints.Role.Communications);
-        // The mic goes straight from the device (not through VoiceMeeter), so its own noise reduction applies.
-        if (Mic(endpoints) is { } mic)
-            AudioEndpoints.SetDefault(mic.Id, AudioEndpoints.Role.Console, AudioEndpoints.Role.Multimedia, AudioEndpoints.Role.Communications);
+    // the sink renamed by Hub comes first, so a name left behind by a crash still finds the same device
+    static readonly string[] VirtualSinkNames = [$"({SinkInterface})", "Steam Streaming Speakers", "Steam Streaming Microphone"];
 
-        _settings.AudioRouted = true;
-        _settings.Save();
-        ApplySampleRates();
-        WriteEqualizerApo();
-        ApplyFaders();
-        RenameChannelDevices();
-    }
+    /// <summary>The sink's name while Hub audio is on, so Windows and apps show "Hub (Hub Audio)" as the default device.</summary>
+    const string SinkDescription = "Hub", SinkInterface = "Hub Audio";
 
-    // ---------------- uninstall ----------------
+    static bool IsVirtualSink(string name) => VirtualSinkNames.Any(v => name.Contains(v, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>
-    /// Undoes Hub's changes to Windows audio (run by the uninstaller): Equalizer APO's config.txt goes back to the
-    /// copy saved before Hub's first write, hidden devices are shown again and the channel devices get their
-    /// VoiceMeeter names back. VoiceMeeter's own routing and the default devices are left as they are.
-    /// </summary>
-    public List<string> Cleanup()
-    {
-        var done = new List<string>();
-        if (DryRun) return done;
-        if (EapoConfigDir() is { } dir)
-        {
-            var config = Path.Combine(dir, "config.txt");
-            var backup = config + ".before-hub";
-            if (File.Exists(backup)) { File.Copy(backup, config, overwrite: true); File.Delete(backup); done.Add("Equalizer APO config restored"); }
-            else if (File.Exists(config) && File.ReadAllText(config).Contains("# Managed by Hub")) { File.WriteAllText(config, ""); done.Add("Equalizer APO config cleared"); }
-            var hubDir = Path.Combine(dir, "hub");
-            foreach (var f in Directory.Exists(hubDir) ? Directory.GetFiles(hubDir) : [])
-                try { File.Delete(f); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { /* the limiter DLL stays until the audio engine restarts */ }
-        }
-        if (_settings.HiddenEndpoints.Count > 0) { ShowHiddenDevices(); done.Add("hidden sound devices shown"); }
-        var endpoints = AudioEndpoints.List();
-        foreach (var c in Channels)
-            if (Endpoint(endpoints, c) is { } ep && !ep.Name.StartsWith(c.EndpointName + " (", StringComparison.Ordinal))
-            {
-                AudioEndpoints.Rename(ep.Id, c.EndpointName);
-                done.Add($"{c.Name} renamed back to {c.EndpointName}");
-            }
-        _settings.AudioRouted = false;
-        _settings.Save();
-        return done;
-    }
-
-    // ---------------- output / mic choice ----------------
-
-    /// <summary>VoiceMeeter driver types → the Bus[0].device.* parameter. WDM first: it bypasses Windows effects (measured).</summary>
-    static readonly (int Type, string Param)[] Drivers = [(3, "wdm"), (4, "ks"), (1, "mme"), (5, "asio")];
-
+    /// <summary>Playback devices that are other software's virtual devices, never a place to send the mix.</summary>
     static bool IsVirtual(string name) =>
-        name.Contains("Voicemeeter", StringComparison.OrdinalIgnoreCase) || name.Contains("VB-Audio", StringComparison.OrdinalIgnoreCase);
+        IsVirtualSink(name) || name.Contains("Sonar", StringComparison.OrdinalIgnoreCase)
+        || name.Contains("Voicemeeter", StringComparison.OrdinalIgnoreCase) || name.Contains("VB-Audio", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Physical outputs VoiceMeeter can send A1 to (each name once).</summary>
-    public List<string> OutputChoices() =>
-        Vm().OutputDevices.Where(d => !IsVirtual(d.Name) && Drivers.Any(x => x.Type == d.DriverType))
-            .Select(d => d.Name).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+    AudioEndpoint? ResolveOutput(List<AudioEndpoint> endpoints) => ResolveOutput(endpoints, _settings);
 
     /// <summary>
-    /// The chosen output on the best driver it is available with. With nothing chosen yet, Hub takes the device
-    /// Windows was playing to before routing (that is where the user's headphones are) and remembers it.
+    /// The chosen output. With nothing chosen yet, the device Windows plays to right now (that is where the user's
+    /// headphones are); <see cref="Start"/> remembers it.
     /// </summary>
-    (string Driver, string Name) ResolveOutput(VoiceMeeter vm)
+    static AudioEndpoint? ResolveOutput(List<AudioEndpoint> endpoints, AppSettings settings)
     {
-        var wanted = _settings.AudioOutput ?? WindowsDefaultOutputName();
-        var match = vm.OutputDevices
-            .Where(d => wanted is not null && d.Name.Equals(wanted, StringComparison.OrdinalIgnoreCase))
-            .Select(d => (Rank: Array.FindIndex(Drivers, x => x.Type == d.DriverType), d.Name))
-            .Where(d => d.Rank >= 0)
-            .OrderBy(d => d.Rank)
-            .FirstOrDefault();
-        if (match.Name is null)
-            throw new InvalidOperationException(wanted is null
-                ? "Pick your headphones or speakers under Output & mic on the Audio page, then configure routing"
-                : $"VoiceMeeter can't see “{wanted}” — turn it on or pick another output");
-        return (Drivers[match.Rank].Param, match.Name);
+        var id = settings.AudioOutput ?? AudioEndpoints.GetDefault(render: true);
+        return endpoints.FirstOrDefault(e => e.Id == id && e.IsRender && e.Active && !IsVirtual(e.Name));
     }
 
-    /// <summary>Friendly name of Windows' default playback device, unless that is already one of VoiceMeeter's.</summary>
-    static string? WindowsDefaultOutputName()
+    /// <summary>
+    /// The device apps play to while Hub captures them: the user's choice, else a virtual device nobody hears
+    /// (Steam's streaming speakers), else any other active playback device, which Hub then mutes.
+    /// </summary>
+    AudioEndpoint? ResolveSink(List<AudioEndpoint> endpoints, string? outputId)
     {
-        var id = AudioEndpoints.GetDefault(render: true);
-        var name = AudioEndpoints.List().FirstOrDefault(e => e.Id == id)?.Name;
-        return name is null || IsVirtual(name) ? null : name;
+        var candidates = endpoints.Where(e => e.IsRender && e.Active && e.Id != outputId).ToList();
+        if (_settings.SinkEndpoint is { } id && candidates.FirstOrDefault(e => e.Id == id) is { } chosen) return chosen;
+        return VirtualSinkNames.Select(v => candidates.FirstOrDefault(e => e.Name.Contains(v, StringComparison.OrdinalIgnoreCase))).FirstOrDefault(e => e is not null)
+            ?? candidates.FirstOrDefault(e => !IsVirtual(e.Name));
     }
 
-    /// <summary>The output Hub routes to right now (what ResolveOutput would pick), or null.</summary>
-    public string? CurrentOutput()
+    /// <summary>A real device used as the sink must stay silent; a virtual one is silent already.</summary>
+    static void PrepareSink(AudioEndpoint sink)
     {
-        try { return ResolveOutput(Vm()).Name; } catch (Exception) { return _settings.AudioOutput; }
+        if (IsVirtualSink(sink.Name)) return;
+        var vol = Wasapi.Activate<Wasapi.IAudioEndpointVolume>(Wasapi.Device(sink.Id));
+        try { var ctx = Guid.Empty; vol.SetMute(true, ref ctx); }
+        finally { System.Runtime.InteropServices.Marshal.ReleaseComObject(vol); }
     }
 
-    public void SetOutput(string? name)
+    /// <summary>Physical outputs Hub can play to.</summary>
+    public List<AudioEndpoint> OutputChoices() =>
+        AudioEndpoints.List().Where(e => e.IsRender && e.Active && !IsVirtual(e.Name)).OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+
+    public string? CurrentOutput() => ResolveOutput(AudioEndpoints.List())?.Id;
+
+    public void SetOutput(string? id)
     {
-        _settings.AudioOutput = string.IsNullOrWhiteSpace(name) ? null : name;
+        _settings.AudioOutput = string.IsNullOrWhiteSpace(id) ? null : id;
         _settings.Save();
-        if (_settings.AudioRouted) ConfigureRouting();
+        Restart();
+    }
+
+    void Restart()
+    {
+        if (!_settings.AudioRouted) return;
+        Shutdown();
+        Resume();
     }
 
     public List<AudioEndpoint> MicChoices() => AudioEndpoints.List().Where(e => !e.IsRender && e.Active && !IsVirtual(e.Name)).ToList();
@@ -417,87 +444,141 @@ public sealed class AudioService : IDisposable
             AudioEndpoints.SetDefault(mic.Id, AudioEndpoints.Role.Console, AudioEndpoints.Role.Multimedia, AudioEndpoints.Role.Communications);
     }
 
-    // ---------------- device tidy-up ----------------
+    // ---------------- per-app channels ----------------
 
-    /// <summary>Renames the three VoiceMeeter inputs to "Game", "Chat" and "Media" so they are obvious everywhere in Windows.</summary>
-    public void RenameChannelDevices()
-    {
-        if (DryRun) return;
-        var endpoints = AudioEndpoints.List();
-        foreach (var c in Channels)
-            if (Endpoint(endpoints, c) is { } ep && !ep.Name.StartsWith(c.Name + " (", StringComparison.Ordinal))
-                AudioEndpoints.Rename(ep.Id, c.Name);
-    }
-
-    /// <summary>VoiceMeeter's extra endpoints (In 1–5, Out A1–B3) that Hub doesn't use.</summary>
-    public List<AudioEndpoint> UnusedDevices()
-    {
-        var endpoints = AudioEndpoints.List();
-        var used = Channels.Select(c => Endpoint(endpoints, c)?.Guid).ToHashSet();
-        return endpoints.Where(e => e.Active && !used.Contains(e.Guid)
-            && e.Name.Contains("Voicemeeter", StringComparison.OrdinalIgnoreCase)).ToList();
-    }
-
-    public int HideUnusedDevices()
-    {
-        if (DryRun) return 0;
-        var unused = UnusedDevices();
-        foreach (var e in unused)
-        {
-            AudioEndpoints.SetVisible(e.Id, false);
-            if (!_settings.HiddenEndpoints.Contains(e.Id)) _settings.HiddenEndpoints.Add(e.Id);
-        }
-        _settings.Save();
-        return unused.Count;
-    }
-
-    public void ShowHiddenDevices()
-    {
-        if (DryRun) return;
-        foreach (var id in _settings.HiddenEndpoints) AudioEndpoints.SetVisible(id, true);
-        _settings.HiddenEndpoints.Clear();
-        _settings.Save();
-    }
-
-    // ---------------- per-app routing ----------------
-
+    /// <param name="Channel">"game"/"chat"/"media" while Hub captures it; null when it plays straight to another device.</param>
     public sealed record AppRoute(string Name, string? Channel, bool Playing);
 
-    static readonly HashSet<string> IgnoredProcesses = new(StringComparer.OrdinalIgnoreCase) { "Hub", "audiodg", "voicemeeter8x64", "voicemeeter8" };
+    static readonly HashSet<string> IgnoredProcesses = new(StringComparer.OrdinalIgnoreCase) { "Hub", "audiodg" };
 
-    /// <summary>Apps with an audio session right now, and which channel (or other device) they play on.</summary>
+    /// <summary>Apps with an audio session right now and the channel each plays on.</summary>
     public List<AppRoute> Apps()
     {
         var endpoints = AudioEndpoints.List();
-        var byGuid = Channels.Select(c => (c.Id, Endpoint(endpoints, c)?.Guid)).Where(x => x.Guid is not null).ToDictionary(x => x.Guid!, x => x.Id);
+        var sinkGuid = _sinkId is null ? null : endpoints.FirstOrDefault(e => e.Id == _sinkId)?.Guid;
         return AudioSessions.List()
             .Where(s => !IgnoredProcesses.Contains(s.ProcessName))
             .GroupBy(s => s.ProcessName, StringComparer.OrdinalIgnoreCase)
             .Select(g => new AppRoute(g.Key,
-                g.Select(s => byGuid.GetValueOrDefault(s.EndpointGuid)).FirstOrDefault(ch => ch is not null),
+                g.Any(s => s.EndpointGuid == sinkGuid) ? AppChannels.For(g.Key, _settings.AppChannels).ToString().ToLowerInvariant() : null,
                 g.Any(s => s.Active)))
             .OrderByDescending(a => a.Playing).ThenBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
-    /// <summary>Sends every running instance of an app to a channel; Windows remembers the choice for that app.</summary>
+    /// <summary>
+    /// Puts an app on a channel (remembered by process name). An app that was sent to a specific device follows the
+    /// Windows default again, so it reaches Hub.
+    /// </summary>
     public void AssignApp(string processName, string channelId)
     {
+        if (!Channels.Any(c => c.Id == channelId)) throw new ArgumentException($"No channel “{channelId}”");
+        _settings.AppChannels[processName.ToLowerInvariant()] = channelId;
+        _settings.Save();
         if (DryRun) return;
-        var endpoints = AudioEndpoints.List();
-        var target = Endpoint(endpoints, Channels.First(c => c.Id == channelId)) ?? throw new InvalidOperationException("Channel device missing");
-        var pids = AudioSessions.List().Where(s => s.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase)).Select(s => s.ProcessId).Distinct().ToList();
-        if (pids.Count == 0) throw new InvalidOperationException($"{processName} isn't playing audio right now");
-        // Game is the system default; clearing the per-app override keeps the app following the default.
-        foreach (var pid in pids) AudioSessions.SetAppOutput(pid, channelId == "game" ? null : target.Id);
+        foreach (var pid in AudioSessions.List().Where(s => s.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase)).Select(s => s.ProcessId).Distinct())
+            if (AudioSessions.GetAppOutput(pid) is not null) AudioSessions.SetAppOutput(pid, null);
     }
 
     public string Summary()
     {
-        var s = GetStatus();
-        if (!s.Routed) return "Audio setup not finished — open the Audio page.";
+        if (_engine is null) return _settings.AudioRouted ? "Hub audio waiting — open the Audio page." : "Hub audio is off.";
         return string.Join(" · ", Channels.Select(c => $"{c.Name}: {ActivePreset(c.Channel).Name}"));
     }
 
-    public void Dispose() => _vm?.Dispose();
+    /// <summary>True when Hub audio is on but not running yet (e.g. the headphones aren't connected at logon).</summary>
+    public bool WaitingToResume => _settings.AudioRouted && _engine is null;
+
+    // ---------------- Hub 1.0 setup and uninstall ----------------
+
+    /// <summary>
+    /// Hub 1.0 routed the channels through VoiceMeeter Potato and Equalizer APO. Undoes what it changed, once, the
+    /// first time this version runs with such settings: the engine replaces all of it.
+    /// </summary>
+    public void MigrateFromVoiceMeeter()
+    {
+        if (DryRun) return;
+        if (_settings.AudioOutput is { } output && !output.StartsWith('{'))
+        {
+            _settings.AudioOutput = null; // 1.0 stored a VoiceMeeter device name here, not an endpoint id
+            _settings.Save();
+        }
+        if (_settings.ChannelEndpoints.Count == 0) return;
+        UndoVoiceMeeterSetup();
+        _settings.AudioRouted = false; // Hub 1.0's "routed" meant VoiceMeeter; the user turns the engine on
+        _settings.Save();
+    }
+
+    /// <summary>
+    /// Undoes Hub's changes to Windows audio (run by the uninstaller): the default devices and the sink's name go
+    /// back, and anything Hub 1.0 set up for VoiceMeeter and Equalizer APO is restored.
+    /// </summary>
+    public List<string> Cleanup()
+    {
+        var done = new List<string>();
+        if (DryRun) return done;
+        if (_settings.AudioRouted || _settings.SinkOriginalName is not null)
+        {
+            RestoreDefaults(_settings);
+            done.Add("Windows sound devices restored");
+        }
+        done.AddRange(UndoVoiceMeeterSetup());
+        _settings.AudioRouted = false;
+        _settings.Save();
+        return done;
+    }
+
+    /// <summary>
+    /// Equalizer APO's config.txt goes back to the copy saved before Hub 1.0's first write, hidden devices are shown
+    /// again and the VoiceMeeter inputs get their names back. VoiceMeeter's own routing is left as it is.
+    /// </summary>
+    List<string> UndoVoiceMeeterSetup()
+    {
+        var done = new List<string>();
+        if (EapoConfigDir() is { } dir)
+        {
+            var config = Path.Combine(dir, "config.txt");
+            var backup = config + ".before-hub";
+            if (File.Exists(backup)) { File.Copy(backup, config, overwrite: true); File.Delete(backup); done.Add("Equalizer APO config restored"); }
+            else if (File.Exists(config) && File.ReadAllText(config).Contains("# Managed by Hub")) { File.WriteAllText(config, ""); done.Add("Equalizer APO config cleared"); }
+            var hubDir = Path.Combine(dir, "hub");
+            foreach (var f in Directory.Exists(hubDir) ? Directory.GetFiles(hubDir) : [])
+                try { File.Delete(f); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { /* the old limiter DLL stays until the audio engine restarts */ }
+        }
+        if (_settings.HiddenEndpoints.Count > 0)
+        {
+            foreach (var id in _settings.HiddenEndpoints)
+                try { AudioEndpoints.SetVisible(id, true); } catch (Exception) { /* device removed */ }
+            _settings.HiddenEndpoints.Clear();
+            done.Add("hidden sound devices shown");
+        }
+        var endpoints = AudioEndpoints.List();
+        foreach (var (channel, guid) in _settings.ChannelEndpoints)
+            if (LegacyEndpointNames.GetValueOrDefault(channel) is { } name
+                && endpoints.FirstOrDefault(e => e.IsRender && e.Guid == guid) is { } ep
+                && !ep.Name.StartsWith(name + " (", StringComparison.Ordinal))
+            {
+                try { AudioEndpoints.Rename(ep.Id, name); done.Add($"{ep.Name} renamed back to {name}"); }
+                catch (Exception) { /* leave the name */ }
+            }
+        _settings.ChannelEndpoints.Clear();
+        _settings.Save();
+        return done;
+    }
+
+    /// <summary>The VoiceMeeter inputs Hub 1.0 renamed to Game/Chat/Media.</summary>
+    static readonly Dictionary<string, string> LegacyEndpointNames = new()
+    {
+        ["game"] = "Voicemeeter Input", ["chat"] = "Voicemeeter AUX Input", ["media"] = "Voicemeeter VAIO3 Input",
+    };
+
+    static string? EapoConfigDir()
+    {
+        using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\EqualizerAPO");
+        var dir = key?.GetValue("ConfigPath") as string
+                  ?? (key?.GetValue("InstallPath") is string install ? Path.Combine(install, "config") : null);
+        return dir is not null && Directory.Exists(dir) ? dir : null;
+    }
+
+    public void Dispose() => Shutdown();
 }

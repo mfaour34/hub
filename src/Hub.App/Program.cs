@@ -5,8 +5,6 @@ static class Program
     [STAThread]
     static int Main(string[] args)
     {
-        if (args is ["--tidy", ..])
-            return SelfTest.RunTidy(args.Length > 1 ? args[1] : Path.Combine(Path.GetTempPath(), "hub-tidy.log"));
         if (args is ["--audiotest", ..])
             return SelfTest.RunAudio(args.Length > 1 ? args[1] : Path.Combine(Path.GetTempPath(), "hub-audiotest.log"));
         if (args is ["--cleanup", ..]) // uninstaller: undo Hub's audio changes and autostart
@@ -20,6 +18,9 @@ static class Program
             catch (Exception ex) { LogCrash(ex); return 1; }
             return 0;
         }
+        if (args is ["--engine-test", var output, var sink, var secs, ..])
+            return Engine.EngineTest.Run(output, sink, double.Parse(secs, System.Globalization.CultureInfo.InvariantCulture),
+                args.Length > 4 ? args[4] : Path.Combine(Path.GetTempPath(), "hub-engine-test.log"), args.Length > 5 ? args[5] : null);
         if (args is ["--selftest", ..])
             return SelfTest.Run(args.Length > 1 ? args[1] : Path.Combine(Path.GetTempPath(), "hub-selftest.log"));
 
@@ -30,6 +31,8 @@ static class Program
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += (_, e) => LogCrash(e.Exception);
         AppDomain.CurrentDomain.UnhandledException += (_, e) => LogCrash(e.ExceptionObject as Exception);
+        // If Hub dies with its audio on, Windows would keep sending every app to the silent sink device.
+        AppDomain.CurrentDomain.UnhandledException += (_, _) => RestoreAudio();
         TaskScheduler.UnobservedTaskException += (_, e) => { LogCrash(e.Exception); e.SetObserved(); };
 
         ApplicationConfiguration.Initialize();
@@ -50,6 +53,12 @@ static class Program
 
     public static string Version =>
         typeof(Program).Assembly.GetName().Version is { } v ? $"{v.Major}.{v.Minor}.{v.Build}" : "dev";
+
+    static void RestoreAudio()
+    {
+        try { Native.Sta.Run(() => AudioService.RestoreDefaults(AppSettings.Load())).Wait(3000); }
+        catch (Exception) { }
+    }
 
     static void LogCrash(Exception? ex)
     {

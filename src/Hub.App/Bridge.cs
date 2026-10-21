@@ -198,29 +198,27 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
                 return await Sta.Run(() => { audio.DeleteCustom(ch.Channel, a["name"]!.GetValue<string>()); return ChannelJson(ch); });
             }
             case "audio.setVolume": await Sta.Run(() => audio.SetVolume(Channel(a).Channel, a["value"]!.GetValue<double>())); return null;
+            case "audio.setTame":
+                return await Sta.Run(() => { var ch = Channel(a); audio.SetTame(ch.Channel, a["value"]!.GetValue<double>()); return ChannelJson(ch); });
             case "audio.setChatMix": await Sta.Run(() => audio.SetChatMix(a["value"]!.GetValue<double>())); return null;
-            case "audio.setup": await Sta.Run(audio.ConfigureRouting); return null;
+            case "audio.start": await Sta.Run(audio.Start); return null;
+            case "audio.stop": await Sta.Run(audio.Stop); return null;
             case "audio.apps":
                 return await Sta.Run(() => audio.Apps().Select(x => new { name = x.Name, channel = x.Channel, playing = x.Playing }));
             case "audio.assignApp":
                 await Sta.Run(() => audio.AssignApp(a["name"]!.GetValue<string>(), a["channel"]!.GetValue<string>()));
                 return null;
-            case "audio.devices":
-                return await Sta.Run(() => new { unused = audio.UnusedDevices().Select(e => e.Name), hidden = settings.HiddenEndpoints.Count });
-            case "audio.tidy":
-                return await Sta.Run(() => { audio.RenameChannelDevices(); return audio.HideUnusedDevices(); });
-            case "audio.unhide": await Sta.Run(audio.ShowHiddenDevices); return null;
             case "audio.io":
                 return await Sta.Run(() => new
                 {
-                    outputs = audio.GetStatus().VoiceMeeter ? audio.OutputChoices() : [],
+                    outputs = audio.OutputChoices().Select(e => new { id = e.Id, name = e.Name }),
                     output = audio.CurrentOutput(),
                     outputChosen = settings.AudioOutput is not null,
                     mics = audio.MicChoices().Select(e => new { id = e.Id, name = e.Name }),
                     mic = audio.CurrentMic(),
                     micChosen = settings.MicEndpoint is not null,
                 });
-            case "audio.setOutput": await Sta.Run(() => audio.SetOutput(a["name"]?.GetValue<string>())); return null;
+            case "audio.setOutput": await Sta.Run(() => audio.SetOutput(a["id"]?.GetValue<string>())); return null;
             case "audio.setMic": await Sta.Run(() => audio.SetMic(a["id"]?.GetValue<string>())); return null;
 
             // ---------------- settings ----------------
@@ -329,7 +327,7 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
         var s = audio.GetStatus();
         return new
         {
-            status = new { voicemeeter = s.VoiceMeeter, eapo = s.Eapo, routed = s.Routed, steps = s.Steps },
+            status = new { running = s.Running, on = settings.AudioRouted, output = s.Output, sink = s.Sink, blocker = s.Blocker, problem = s.Problem },
             chatMix = settings.ChatMix,
             channels = AudioService.Channels.Select(ChannelJson),
         };
@@ -342,11 +340,13 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
         var d = AudioService.DefaultChain(c.Channel);
         return new
         {
-            id = c.Id, name = c.Name, device = c.EndpointName,
+            id = c.Id, name = c.Name,
             presets = audio.Presets(c.Channel).Select(p => new { name = p.Name, category = p.Category })
                 .Concat(audio.CustomPresets(c.Channel).Select(p => new { name = p.Name, category = "Custom" })),
             defaultChoice = audio.DefaultChoice(c.Channel),
             volume = audio.Volume(c.Channel),
+            tame = audio.Tame(c.Channel),
+            maxTame = AudioService.MaxTameDb,
             active = active.Name,
             custom = audio.IsCustomActive(c.Channel),
             gain = active.GainDb,

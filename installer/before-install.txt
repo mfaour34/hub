@@ -6,10 +6,7 @@ DEVICES (no extra software needed)
   Quit the vendor apps (Razer Synapse, Logitech G HUB) so they don't fight Hub over the devices.
 
 AUDIO CHANNELS (optional)
-  Game / Chat / Media channels with their own EQ, limiter and ChatMix need two free tools.
-  Install them as administrator, then restart Windows:
-    1. VoiceMeeter Potato   https://vb-audio.com/Voicemeeter/potato.htm
-    2. Equalizer APO        https://sourceforge.net/projects/equalizerapo/
-       In its Configurator tick "Voicemeeter Input", "Voicemeeter AUX Input" and
-       "Voicemeeter VAIO3 Input".
-  Hub's Audio page walks you through the rest and shows what is still missing.
+  Game / Chat / Media channels with their own EQ, limiter and ChatMix need no extra software.
+  Press "Turn on" on Hub's Audio page. Hub uses a spare playback device as its silent input;
+  Steam Streaming Speakers (installed with Steam) is ideal and shows as "Hub (Hub Audio)".
+  Quit SteelSeries GG/Sonar first.

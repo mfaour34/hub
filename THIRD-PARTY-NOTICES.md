@@ -23,11 +23,6 @@ Hub is licensed under the GNU General Public License v3.0 (see `LICENSE`).
 - Dynamic-sensitivity curve: PCHIP monotone cubic interpolation. F. N. Fritsch & R. E. Carlson, "Monotone Piecewise Cubic Interpolation", SIAM J. Numer. Anal. 17(2), 1980.
 - Limiter (`native/hub-limiter`): a standard look-ahead peak limiter. D. Giannoulis, M. Massberg & J. D. Reiss, "Digital Dynamic Range Compressor Design — A Tutorial and Analysis", JAES 60(6), 2012.
 
-## Not included (installed by the user)
-
-- [VoiceMeeter Potato](https://vb-audio.com/Voicemeeter/potato.htm) by VB-Audio (donationware). Hub talks to it through its documented Remote API (`VoicemeeterRemote64.dll`, loaded from the VoiceMeeter install folder).
-- [Equalizer APO](https://sourceforge.net/projects/equalizerapo/) (GPL-2.0). Hub writes its documented config files.
-
 ## Trademarks
 
 Razer, Synapse, Viper and HyperSpeed are trademarks of Razer Inc. Logitech, G HUB, PRO X and LIGHTSPEED are trademarks of Logitech. SteelSeries and Sonar are trademarks of SteelSeries ApS. VoiceMeeter is a trademark of VB-Audio Software. They are used here only to say which products Hub works with or can replace. Hub is an independent project, not affiliated with or endorsed by any of these companies, and ships none of their software, images or presets.

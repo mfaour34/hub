@@ -60,7 +60,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\Hub.exe"; Description: "Launch Hub"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-; Restores Equalizer APO's config, shows hidden sound devices, renames channel devices back, removes autostart.
+; Points Windows back at the output device, restores the sink's name and any Hub 1.0 VoiceMeeter/Equalizer APO setup, removes autostart.
 Filename: "{app}\Hub.exe"; Parameters: "--cleanup"; Flags: runhidden waituntilterminated; RunOnceId: "HubCleanup"
 
 [UninstallDelete]

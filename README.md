@@ -118,8 +118,9 @@ Closing the window frees WebView2 completely. Hub then goes back to one small pr
 | Dynamic sensitivity / custom acceleration curve | Synapse | ✅ |
 | Mouse battery and sleep | Synapse | ✅ |
 | Headset EQ, sidetone, noise reduction, auto power-off, battery | G HUB | ✅ written to the headset |
-| Game / Chat / Media channels, parametric EQ, ChatMix | GG Sonar | ✅ via VoiceMeeter Potato + Equalizer APO |
-| Per-app output routing | GG Sonar | ✅ |
+| Game / Chat / Media channels, parametric EQ, ChatMix | GG Sonar | ✅ Hub's own audio engine, no driver or extra software |
+| Per-app channels | GG Sonar | ✅ |
+| Tame loud sounds (gunshots, explosions) without losing footsteps | — | ✅ per channel |
 | RGB lighting, macros recorded in-app, cloud profiles | all | ❌ not planned: F13–F24 mapping covers macros through your own tools |
 | Virtual 7.1 surround (HRTF) | GG Sonar, G HUB | ❌ |
 
@@ -141,11 +142,11 @@ Adding a model is one entry in [`DeviceCatalog.cs`](src/Hub.Core/Devices/DeviceC
 
 1. Download **`Hub-Setup-x.y.z.exe`** from [Releases](https://github.com/mfaour34/hub/releases/latest) and run it. It needs no admin rights and installs to `%LOCALAPPDATA%\Programs\Hub`.
 2. **Quit Synapse, G HUB and GG** and turn off their autostart. Otherwise they keep overwriting device settings. Uninstall them once you're happy with Hub.
-3. *(Optional, for audio channels)* Install [VoiceMeeter Potato](https://vb-audio.com/Voicemeeter/potato.htm) and [Equalizer APO](https://sourceforge.net/projects/equalizerapo/). In Equalizer APO's Configurator, tick *Voicemeeter Input*, *Voicemeeter AUX Input* and *Voicemeeter VAIO3 Input*. Reboot, then press **Configure routing** on Hub's Audio page.
+3. *(Optional, for audio channels)* Press **Turn on** on Hub's Audio page. Hub needs a second playback device to use as its silent input: Steam Streaming Speakers (installed with Steam) is ideal, and Hub shows it as **Hub (Hub Audio)** while audio is on. Leave apps' output on *Default*.
 
-**Requirements:** Windows 10 1809+ or Windows 11 (x64), and the WebView2 Runtime, which comes with Windows 11 and current Edge. You don't need to install .NET.
+**Requirements:** Windows 10 1809+ or Windows 11 (audio channels need Windows 10 2004+) (x64), and the WebView2 Runtime, which comes with Windows 11 and current Edge. You don't need to install .NET.
 
-**Uninstalling** restores Equalizer APO's config, shows any sound devices Hub hid, gives the channel devices back their VoiceMeeter names, and removes the autostart entry. You can choose whether to keep your settings.
+**Uninstalling** points Windows back at your output device, gives the silent input device its own name back, undoes Hub 1.0's VoiceMeeter and Equalizer APO setup if there is one, and removes the autostart entry. You can choose whether to keep your settings.
 
 ## How it works
 
@@ -154,13 +155,13 @@ Adding a model is one entry in [`DeviceCatalog.cs`](src/Hub.Core/Devices/DeviceC
  │  WebView2 UI  ⇄  Bridge  ⇄  DeviceManager  ⇄  HID   │──► mouse (Razer 90-byte feature reports)
  │                         ⇄  AudioService             │──► headset (Logitech Centurion over HID)
  └──────────────────────────────┬──────────────────────┘
-                                │ config / Remote API
-  apps ─► Game │ Chat │ Media ──► Equalizer APO: EQ → hub-limiter ──► VoiceMeeter A1 (WDM) ──► your headphones
+                                │ per-app loopback capture
+  apps ─► silent sink ─► Game │ Chat │ Media ─► EQ → limiter (96 kHz) ─► mix ─► your headphones
 ```
 
 - **Device settings live on the devices.** Hub only stores what the hardware can't: presets, audio choices and app preferences, in `%APPDATA%\Hub\settings.json`.
-- **The audio processing isn't Hub's process.** It runs in Windows' audio engine (`audiodg.exe`) through Equalizer APO. If Hub is closed, your EQ keeps working.
-- **The limiter** (`native/hub-limiter`) is a small C VST2 plugin: a stereo-linked look-ahead peak limiter with no runtime dependencies.
+- **Audio runs in Hub, without a driver.** While Hub audio is on, Windows' default playback device is a silent "sink" (Steam Streaming Speakers, renamed *Hub (Hub Audio)*). Hub captures each app with per-process loopback, sorts it into Game, Chat or Media, runs each channel's EQ and limiter at 96 kHz and plays the mix to your output device from one real-time thread. If Hub quits, crashes or you log off, Windows goes back to playing straight to your output device.
+- **The limiter** (`native/hub-limiter`, built as `hub-dsp.dll`) is a small C library: a stereo-linked look-ahead peak limiter with no runtime dependencies.
 
 ## Building from source
 
@@ -172,7 +173,7 @@ dotnet publish src/Hub.App -c Release -o publish
 ISCC installer\Hub.iss            # Inno Setup 6 → dist\Hub-Setup-x.y.z.exe
 ```
 
-Handy switches: `Hub.exe --selftest [log]` runs read-only device checks. `--shots <dir> [page…]` renders UI pages to PNG. `HUB_DATA_DIR` moves the settings folder. `HUB_DRY_RUN=1` stops Hub from touching Windows audio.
+Handy switches: `Hub.exe --selftest [log]` runs read-only device checks. `--shots <dir> [page…]` renders UI pages to PNG. `HUB_DATA_DIR` moves the settings folder. `HUB_DRY_RUN=1` stops Hub from touching Windows audio. `--audiotest [log]` prints the audio state read-only.
 
 CI builds every push. It also installs, runs and uninstalls the installer on a clean Windows runner, then attaches the installer to tagged releases.
 

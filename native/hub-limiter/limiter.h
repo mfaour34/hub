@@ -25,7 +25,7 @@
  *      release). Both stages can only lower the gain, so the attack stage's guarantee is kept.
  *   5. A final hard clamp at the ceiling catches rounding residue; non-finite input is muted.
  *
- * The plugin has no parameters. The constants in limiter.c were tuned by measurement for loud game
+ * Its only parameter is the ceiling (set per channel by "tame loud sounds"). The constants in limiter.c were tuned by measurement for loud game
  * audio after a boosting EQ: transparent below full scale, fast on bursts. Processing is strictly frame by
  * frame, so the output does not depend on the host's block size.
  */
