@@ -348,6 +348,21 @@ img.drawing { filter: none !important; }
 .theme-edit input[type=color]::-webkit-color-swatch { border: 0; border-radius: 2px; }
 .theme-edit select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 3px; padding: 3px 6px; font: 12px var(--label-font); }
 .settings-sub { font: 12px var(--label-font); color: var(--muted); text-transform: lowercase; margin: 18px 0 6px; }
+/* ---------- mouse test ---------- */
+.mt-big { font-size: 56px; font-weight: 600; letter-spacing: -.03em; line-height: 1; margin: 6px 0 4px; font-variant-numeric: tabular-nums; }
+.mt-big small { font: 400 15px var(--label-font); color: var(--muted); letter-spacing: 0; }
+#mtSteady { white-space: nowrap; }
+.mt-set { font: 12px var(--label-font); color: var(--muted); margin-left: 14px; letter-spacing: 0; }
+#mtHistory { width: 100%; height: 100px; display: block; margin-top: 14px; background: var(--panel-2); border-radius: 4px; }
+.mt-pad { height: 110px; display: grid; place-items: center; border: 1px dashed var(--line); border-radius: 4px; color: var(--muted);
+  font: 12px var(--label-font); margin-bottom: 8px; cursor: crosshair; }
+.mt-pad:active { background: var(--panel-2); }
+.mt-btn { display: grid; grid-template-columns: 70px 100px 90px 1fr; gap: 10px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.mt-btn span:first-child { font: 12px var(--label-font); color: var(--muted); }
+.mt-btn b { font: 600 12px var(--label-font); color: var(--good); }
+.mt-btn.bad b { color: var(--bad); }
+.mt-btn small { color: var(--muted); font: 11.5px var(--label-font); }
+
 /* ---------- system ---------- */
 .live-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px; }
 .live-strip .card { margin: 0; }

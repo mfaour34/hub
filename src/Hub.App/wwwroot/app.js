@@ -91,12 +91,63 @@ function showPage(page) {
   if (page === "settings") loadSettings();
   if (page === "system") loadSystem();
   setLive(page === "system" || page === "overview");
+  setMouseTest(page === "mouse" && $("#mouseTabs [data-tab=test]").classList.contains("active"));
 }
 $$("#mouseTabs button").forEach((b) => b.addEventListener("click", () => {
   $$("#mouseTabs button").forEach((x) => x.classList.toggle("active", x === b));
   $$("#page-mouse .tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === b.dataset.tab));
   if (b.dataset.tab === "advanced") drawCurve();
+  setMouseTest(b.dataset.tab === "test");
 }));
+
+// ---------------------------------------------------------------- mouse test
+let mouseTestTimer = null;
+
+/** The raw-input test runs only while the test tab is on screen in a visible window. */
+function setMouseTest(on) {
+  on = on && !document.hidden;
+  if (!on) {
+    if (mouseTestTimer) { clearTimeout(mouseTestTimer); mouseTestTimer = null; call("mouse.test.stop").catch(() => {}); }
+    return;
+  }
+  if (mouseTestTimer) return;
+  mouseTestTimer = -1;
+  call("mouse.test.start").then(() => {
+    const tick = async () => {
+      if (!mouseTestTimer) return;
+      try { renderMouseTest(await call("mouse.test.read", { thresholdMs: +$("#mtThreshold").value })); } catch { /* next tick */ }
+      if (mouseTestTimer) mouseTestTimer = setTimeout(tick, 250);
+    };
+    tick();
+  }).catch((err) => { mouseTestTimer = null; toast("Mouse test: " + err.message, true); });
+}
+const mouseTestVisible = () => isVisible("mouse") && $("#mouseTabs [data-tab=test]").classList.contains("active");
+document.addEventListener("visibilitychange", () => setMouseTest(mouseTestVisible()));
+
+function renderMouseTest(t) {
+  $("#mtDevice").textContent = t.device || "";
+  $("#mtHz").textContent = t.samples > 20 ? Math.round(t.hz) : "—";
+  $("#mtSet").textContent = mouse?.polling ? `set: ${mouse.polling} Hz` : "";
+  $("#mtSteady").textContent = t.samples <= 20 ? "—" : t.fastEnough ? Math.round(t.steady * 100) + " %" : "move faster";
+  const c = $("#mtHistory"), g = c.getContext("2d"), max = Math.max(mouse?.polling || 1000, ...t.history) * 1.1;
+  g.clearRect(0, 0, c.width, c.height);
+  g.fillStyle = token("--line"); g.fillRect(0, c.height - 1, c.width, 1);
+  const w = c.width / 10;
+  t.history.forEach((hz, i) => {
+    const h = (hz / max) * (c.height - 24), x = i * w + 6;
+    g.fillStyle = token("--accent"); g.fillRect(x, c.height - h, w - 12, h);
+    g.fillStyle = token("--muted"); g.font = `20px ${token("--label-font")}`; g.fillText(Math.round(hz), x, c.height - h - 6);
+  });
+  $("#mtButtons").replaceChildren(...(t.buttons.length ? t.buttons.map((b) => h("div", { class: "mt-btn" + (b.chatter ? " bad" : "") },
+    h("span", {}, b.name), h("span", {}, `${b.presses} press${b.presses === 1 ? "" : "es"}`),
+    h("b", {}, b.chatter ? `${b.chatter} chatter` : "ok"),
+    h("small", {}, b.fastestGapMs == null ? "" : `fastest gap ${b.fastestGapMs.toFixed(1)} ms`))) : [h("p", { class: "muted" }, "No clicks yet.")]));
+}
+$("#mtThreshold").addEventListener("input", () => ($("#mtThresholdVal").textContent = $("#mtThreshold").value + " ms"));
+$("#mtThresholdVal").textContent = "30 ms";
+$("#mtReset").addEventListener("click", () => call("mouse.test.reset").catch(() => {}));
+// the pad swallows clicks so testing never presses a control; raw input still sees every press
+["mousedown", "mouseup", "click", "auxclick", "contextmenu"].forEach((ev) => $("#mtPad").addEventListener(ev, (e) => e.preventDefault()));
 
 // ---------------------------------------------------------------- live state
 let state = null;

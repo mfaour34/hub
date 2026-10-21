@@ -66,6 +66,7 @@
           <button data-tab="power">Power</button>
           <button data-tab="calibration">Calibration</button>
           <button data-tab="advanced">Advanced</button>
+          <button data-tab="test">Test</button>
         </div>
       </header>
       <div class="offline" id="mouseOffline">Mouse not connected or asleep — move it to wake it.</div>
@@ -136,6 +137,27 @@
             <p class="hint">Landing must be lower than lift-off.</p>
           </div>
           <div class="row end"><button class="btn primary" id="applyLift">Apply</button></div>
+        </div>
+      </div>
+
+      <div class="tab" data-tab="test">
+        <div class="grid-2">
+          <div class="card">
+            <div class="row between"><div class="card-title">polling rate</div><span class="muted mono" id="mtDevice"></span></div>
+            <div class="mt-big"><span id="mtHz">—</span><small> Hz</small><span class="mt-set" id="mtSet"></span></div>
+            <div class="row between"><span>steadiness <small class="muted">how evenly reports arrive; below 90 % points at USB or wireless trouble</small></span><b class="mono" id="mtSteady">—</b></div>
+            <div class="settings-sub">reports per second, last 10 s of movement</div>
+            <canvas id="mtHistory" width="900" height="200"></canvas>
+            <p class="hint">Move the mouse quickly in circles: a mouse only reports while it moves, so slow movement reads low.</p>
+          </div>
+          <div class="card">
+            <div class="row between"><div class="card-title">clicks</div><button class="btn small" id="mtReset">reset</button></div>
+            <div class="mt-pad" id="mtPad">click here with every button</div>
+            <div id="mtButtons"></div>
+            <label class="field">Chatter below <b id="mtThresholdVal"></b>
+              <input type="range" id="mtThreshold" min="10" max="80" step="5" value="30"></label>
+            <p class="hint">A press that follows the same button's release faster than a finger can (by default 30 ms) is the switch bouncing: the classic double-click fault.</p>
+          </div>
         </div>
       </div>
 

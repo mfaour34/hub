@@ -134,6 +134,24 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
                 }
                 return null;
             }
+            case "mouse.test.start": StartMouseTest(); return null;
+            case "mouse.test.stop": StopMouseTest(); return null;
+            case "mouse.test.reset": _mouseTest?.ResetClicks(); return null;
+            case "mouse.test.read":
+            {
+                // a read means the tab is on screen: restart a session the watchdog ended (e.g. across sleep)
+                if (_mouseTest is null) StartMouseTest();
+                var test = _mouseTest!;
+                _mouseTestRead = Environment.TickCount64;
+                if (a["thresholdMs"]?.GetValue<double>() is { } threshold) test.ThresholdMs = threshold;
+                var s = test.Snapshot();
+                string[] names = ["left", "right", "middle", "back", "forward"];
+                return new
+                {
+                    device = s.Device, hz = s.Polling.Hz, steady = s.Polling.Steady, fastEnough = s.Polling.FastEnough, samples = s.Polling.Samples, history = s.Polling.History,
+                    buttons = s.Buttons.Select(b => new { button = b.Button, name = names[b.Button], presses = b.Presses, chatter = b.Chatter, fastestGapMs = b.FastestGapMs }),
+                };
+            }
             case "mouse.setRotation":
                 return await OnMouse(m => { m.SetRotation(a["enabled"]!.GetValue<bool>(), a["angle"]!.GetValue<int>()); return 0; });
             case "mouse.setButton":
@@ -284,6 +302,38 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
     }
 
     // ---------------- helpers ----------------
+
+    RawMouse? _mouseTest;
+    long _mouseTestRead;
+    System.Threading.Timer? _mouseTestWatchdog;
+
+    /// <summary>
+    /// Raw input only while the Mouse page's test tab reads it: the page stops it when it leaves, and a watchdog stops
+    /// it when nobody has read for 5 s (window closed or minimized mid-test).
+    /// </summary>
+    void StartMouseTest()
+    {
+        lock (this)
+        {
+            _mouseTestRead = Environment.TickCount64;
+            if (_mouseTest is not null) return;
+            _mouseTest = new RawMouse();
+            _mouseTest.Start();
+            _mouseTestWatchdog = new System.Threading.Timer(_ =>
+            {
+                if (Environment.TickCount64 - _mouseTestRead > 5000) StopMouseTest();
+            }, null, 1000, 1000);
+        }
+    }
+
+    void StopMouseTest()
+    {
+        lock (this)
+        {
+            _mouseTestWatchdog?.Dispose(); _mouseTestWatchdog = null;
+            _mouseTest?.Dispose(); _mouseTest = null;
+        }
+    }
 
     /// <summary>7-day counts for Overview and the System page heading.</summary>
     object StabilityJson()

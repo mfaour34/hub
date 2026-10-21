@@ -21,6 +21,8 @@ static class Program
         if (args is ["--engine-test", var output, var sink, var secs, ..])
             return Engine.EngineTest.Run(output, sink, double.Parse(secs, System.Globalization.CultureInfo.InvariantCulture),
                 args.Length > 4 ? args[4] : Path.Combine(Path.GetTempPath(), "hub-engine-test.log"), args.Length > 5 ? args[5] : null);
+        if (args is ["--mousetest", var mouseSecs, ..])
+            return SelfTest.RunMouse(int.Parse(mouseSecs), args.Length > 2 ? args[2] : Path.Combine(Path.GetTempPath(), "hub-mousetest.log"));
         if (args is ["--systemtest", ..])
             return SelfTest.RunSystem(args.Length > 1 ? args[1] : Path.Combine(Path.GetTempPath(), "hub-systemtest.log"));
         if (args is ["--selftest", ..])

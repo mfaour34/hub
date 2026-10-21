@@ -80,6 +80,23 @@ static class SelfTest
         return failures == 0 ? 0 : 1;
     }
 
+    /// <summary>`Hub.exe --mousetest seconds [log]`: a raw-input test session, logging its numbers once a second.</summary>
+    public static int RunMouse(int seconds, string logPath)
+    {
+        using var log = new StreamWriter(logPath, append: false) { AutoFlush = true };
+        using var mouse = new RawMouse();
+        mouse.Start();
+        for (int i = 0; i < seconds; i++)
+        {
+            Thread.Sleep(1000);
+            var s = mouse.Snapshot();
+            log.WriteLine($"{i + 1}s device={s.Device ?? "-"} hz={s.Polling.Hz:0} steady={s.Polling.Steady:P0} samples={s.Polling.Samples} " +
+                $"history=[{string.Join(" ", s.Polling.History.Select(h => h.ToString("0")))}] buttons=[{string.Join(" ", s.Buttons.Select(b => $"{b.Button}:{b.Presses}/{b.Chatter}"))}]");
+        }
+        log.WriteLine("RESULT: ok");
+        return 0;
+    }
+
     /// <summary>`Hub.exe --systemtest [log]`: the System page's specs, live readings and the crash-log catch-up, read-only.</summary>
     public static int RunSystem(string logPath)
     {
