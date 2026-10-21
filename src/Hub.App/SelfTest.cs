@@ -73,8 +73,40 @@ static class SelfTest
             Line($"events seen: {(events.Count == 0 ? "none" : string.Join("; ", events))}");
         }
 
+        Check("specs", () => SystemInfo.Specs.Read(new(null, null), new(null, null)).Sum(s => s.Rows.Count) + " rows");
+        Check("live", () => SystemInfo.Live.Read());
+
         Line(failures == 0 ? "RESULT: all checks passed" : $"RESULT: {failures} check(s) failed");
         return failures == 0 ? 0 : 1;
+    }
+
+    /// <summary>`Hub.exe --systemtest [log]`: the System page's specs, live readings and the crash-log catch-up, read-only.</summary>
+    public static int RunSystem(string logPath)
+    {
+        using var log = new StreamWriter(logPath, append: false);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var sections = SystemInfo.Specs.Read(new(null, null), new(null, null));
+        log.WriteLine(Hub.Core.Diagnostics.SpecsText.Format(sections));
+        log.WriteLine($"specs read in {watch.ElapsedMilliseconds} ms ({string.Join(", ", sections.Select(s => s.Title))})");
+        watch.Restart();
+        log.WriteLine($"live: {SystemInfo.Live.Read()} in {watch.ElapsedMilliseconds} ms");
+        watch.Restart();
+        var usb = new SystemInfo.DeviceWatcher(Path.Combine(Path.GetTempPath(), "hub-devices-test.jsonl"), _ => null).Connected();
+        log.WriteLine($"usb devices: {usb.Count} in {watch.ElapsedMilliseconds} ms");
+        foreach (var d in usb) log.WriteLine($"  {d.Kind,-10} {d.Name}  [{d.Id}]");
+        // crash-log catch-up into a scratch file (the real log is the running Hub's)
+        var path = Path.Combine(Path.GetTempPath(), $"hub-stability-test-{Environment.ProcessId}.jsonl");
+        using (var stability = new SystemInfo.StabilityWatcher(path))
+        {
+            watch.Restart();
+            stability.CatchUpNow();
+            var events = stability.Log.Recent(DateTimeOffset.Now);
+            log.WriteLine($"stability catch-up: {events.Count} entries in {watch.ElapsedMilliseconds} ms");
+            foreach (var e in events) log.WriteLine($"  {e.Time:yyyy-MM-dd HH:mm} {e.Kind,-18} {e.Title} — {e.Detail} [{e.Key}]");
+        }
+        File.Delete(path);
+        log.WriteLine("RESULT: ok");
+        return 0;
     }
 
     /// <summary>`Hub.exe --audiotest [log]`: read-only state of Hub audio (no defaults or devices are changed).</summary>

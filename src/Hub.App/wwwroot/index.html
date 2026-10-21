@@ -14,6 +14,7 @@
       <button data-page="mouse"><svg viewBox="0 0 24 24"><path d="M12 2a6 6 0 0 0-6 6v8a6 6 0 0 0 12 0V8a6 6 0 0 0-6-6zm0 2v5M8 9h8" fill="none" stroke-width="2"/></svg>Mouse</button>
       <button data-page="headset"><svg viewBox="0 0 24 24"><path d="M4 14v-2a8 8 0 0 1 16 0v2M4 14h3v6H5a1 1 0 0 1-1-1zM20 14h-3v6h2a1 1 0 0 0 1-1z" fill="none" stroke-width="2"/></svg>Headset</button>
       <button data-page="audio"><svg viewBox="0 0 24 24"><path d="M5 10v4M9 6v12M13 3v18M17 8v8M21 11v2" fill="none" stroke-width="2" stroke-linecap="round"/></svg>Audio</button>
+      <button data-page="system"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" fill="none" stroke-width="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" fill="none" stroke-width="2" stroke-linecap="round"/></svg>System</button>
       <button data-page="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" fill="none" stroke-width="2" stroke-linecap="round"/></svg>Settings</button>
     </nav>
     <div class="side-status" id="sideStatus"></div>
@@ -43,9 +44,15 @@
           </div>
         </div>
       </div>
-      <div class="card" id="ovAudio">
-        <div class="card-title">Audio</div>
-        <div id="ovAudioBody" class="muted">—</div>
+      <div class="grid-2">
+        <div class="card" id="ovAudio">
+          <div class="card-title">Audio</div>
+          <div id="ovAudioBody" class="muted">—</div>
+        </div>
+        <div class="card" id="ovSystem">
+          <div class="card-title">system</div>
+          <div id="ovSystemBody" class="muted">—</div>
+        </div>
       </div>
     </section>
 
@@ -236,6 +243,25 @@
           <div id="apps"></div>
         </div>
       </div>
+    </section>
+
+    <!-- SYSTEM -->
+    <section class="page" id="page-system">
+      <header class="page-head"><h1>System</h1></header>
+      <div class="live-strip" id="sysLive"></div>
+      <div class="card">
+        <div class="row between"><div class="card-title">stability · last 7 days</div><span class="muted mono" id="sysEventsSummary"></span></div>
+        <div id="sysEvents" class="muted">—</div>
+      </div>
+      <div class="card">
+        <div class="card-title">devices</div>
+        <div class="devices-grid">
+          <div><div class="settings-sub">connected now</div><div id="sysConnected" class="muted">—</div></div>
+          <div><div class="settings-sub">activity · last 7 days</div><div id="sysActivity" class="muted">—</div></div>
+        </div>
+      </div>
+      <div class="row between specs-head"><div class="card-title">specs</div><button class="btn small" id="copySpecs">copy specs</button></div>
+      <div class="specs" id="sysSpecs"><p class="muted">Reading…</p></div>
     </section>
 
     <!-- SETTINGS -->

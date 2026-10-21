@@ -23,6 +23,8 @@ if (host) {
       m.ok ? p.resolve(m.data) : p.reject(new Error(m.error));
     } else if (m.event === "state") {
       onState(m.data);
+    } else if (m.event === "devices" && isVisible("system")) {
+      renderDevices();
     }
   });
 }
@@ -87,6 +89,8 @@ function showPage(page) {
   if (page === "headset") loadHeadset();
   if (page === "audio") loadAudio();
   if (page === "settings") loadSettings();
+  if (page === "system") loadSystem();
+  setLive(page === "system" || page === "overview");
 }
 $$("#mouseTabs button").forEach((b) => b.addEventListener("click", () => {
   $$("#mouseTabs button").forEach((x) => x.classList.toggle("active", x === b));
@@ -109,6 +113,7 @@ function onState(s) {
   $("#headsetBatteryBig").replaceChildren(...battery(s.headset.battery));
   if (prev && !prev.mouse.connected && s.mouse.connected && isVisible("mouse")) loadMouse();
   if (prev && !prev.headset.on && s.headset.on && isVisible("headset")) loadHeadset();
+  if (prev && JSON.stringify(prev.stability) !== JSON.stringify(s.stability) && isVisible("system")) renderEvents();
 }
 /** Image for a model: its render in the chosen colour (first colour if that one doesn't exist), else a drawing. */
 function renderSrc(model, color, kind) {
@@ -200,6 +205,7 @@ function renderOverview() {
   $("[data-chips]", ovm).replaceChildren(...(m.summary || []).map((c) => h("span", { class: "chip" }, c)));
   $("[data-chips]", ovh).replaceChildren(...(hs.summary || []).map((c) => h("span", { class: "chip" }, c)));
   $("#ovAudioBody").textContent = state.audioSummary || "";
+  renderOverviewSystem();
   const w = $("#vendorWarning");
   w.textContent = state.vendors.length ? `${state.vendors.join(", ")} still running — quit them so they don't override Hub.` : "All devices are managed by Hub.";
   w.classList.toggle("warn", state.vendors.length > 0);
@@ -954,6 +960,116 @@ $("#normalMode").addEventListener("change", () => saveSettings());
 $("#alertPct").addEventListener("input", () => ($("#alertVal").textContent = $("#alertPct").value + "%"));
 $("#alertPct").addEventListener("change", () => saveSettings());
 
+// ---------------------------------------------------------------- system
+let specsText = "", lastLive = null, liveTimer = null;
+
+async function loadSystem() {
+  renderEvents();
+  renderDevices();
+  try {
+    const s = await call("system.specs");
+    specsText = s.text;
+    $("#sysSpecs").replaceChildren(...s.sections.map((sec) => h("div", { class: "card spec" },
+      h("div", { class: "card-title" }, sec.title),
+      ...sec.rows.map((r) => h("div", { class: "spec-row" }, h("span", {}, r.label), h("b", {}, r.value))))));
+  } catch (err) { $("#sysSpecs").replaceChildren(h("p", { class: "setup-error" }, "Couldn't read the specs: " + err.message)); }
+}
+
+$("#copySpecs").addEventListener("click", async () => {
+  if (!specsText) return;
+  try { await navigator.clipboard.writeText(specsText); toast("Specs copied"); }
+  catch { toast("Couldn't copy to the clipboard", true); }
+});
+
+async function renderDevices() {
+  let d;
+  try { d = await call("system.devices"); } catch (err) { $("#sysConnected").textContent = err.message; return; }
+  $("#sysConnected").replaceChildren(...(d.connected.length ? d.connected.map((x) => h("div", { class: "dev-row" },
+    h("span", { class: "dev-kind" }, x.kind), h("span", {}, x.name))) : [h("p", { class: "muted" }, "No USB devices found.")]));
+  const time = (t) => {
+    const d = new Date(t), today = new Date().toDateString() === d.toDateString();
+    return (today ? "" : d.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + " ")
+      + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  };
+  $("#sysActivity").replaceChildren(...(d.activity.length ? d.activity.slice(0, 50).map((e) => h("div", { class: "dev-row" },
+    h("span", { class: "ev-time" }, time(e.time)), h("span", { class: "dev-action " + e.action }, e.action), h("span", {}, e.name)))
+    : [h("p", { class: "muted" }, "Nothing plugged in or out since Hub started recording.")]));
+}
+
+const KIND_LABEL = { "gpu-reset": "gpu reset", "hardware-error": "hardware", bluescreen: "blue screen", "unexpected-restart": "restart" };
+
+async function renderEvents() {
+  let events;
+  try { events = await call("system.events"); } catch (err) { $("#sysEvents").textContent = err.message; return; }
+  $("#sysEventsSummary").textContent = stabilitySummary(state?.stability);
+  if (!events.length) {
+    $("#sysEvents").replaceChildren(h("p", { class: "muted" }, "No crashes, GPU resets or hardware errors in the last 7 days."));
+    return;
+  }
+  const day = (d) => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const diff = Math.round((today - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 864e5);
+    return diff === 0 ? "today" : diff === 1 ? "yesterday" : d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" }).toLowerCase();
+  };
+  const groups = new Map();
+  for (const e of events) {
+    const d = new Date(e.time), k = day(d);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push({ ...e, d });
+  }
+  $("#sysEvents").replaceChildren(...[...groups].map(([k, list]) => h("div", { class: "ev-day" },
+    h("div", { class: "ev-date" }, k),
+    ...list.map((e) => h("div", { class: "ev-row" },
+      h("span", { class: "ev-time" }, e.d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })),
+      h("span", { class: "ev-kind " + e.kind }, KIND_LABEL[e.kind] || e.kind),
+      h("span", { class: "ev-text" }, h("b", {}, e.title), e.detail ? h("small", {}, e.detail) : null),
+      e.recordId ? h("button", { class: "btn ghost small", title: "Open this record in Event Viewer",
+        onclick: () => call("system.openEvent", { log: e.log, recordId: e.recordId }).catch((err) => toast(err.message, true)) }, "event viewer") : null)))));
+}
+
+function stabilitySummary(s) {
+  if (!s) return "";
+  const parts = [];
+  if (s.gpuResets) parts.push(`${s.gpuResets} gpu reset${s.gpuResets > 1 ? "s" : ""}`);
+  if (s.hardwareErrors) parts.push(`${s.hardwareErrors} hardware error${s.hardwareErrors > 1 ? "s" : ""}`);
+  if (s.bluescreens) parts.push(`${s.bluescreens} blue screen${s.bluescreens > 1 ? "s" : ""}`);
+  if (s.restarts) parts.push(`${s.restarts} unexpected restart${s.restarts > 1 ? "s" : ""}`);
+  return parts.length ? parts.join(" · ") + " this week" : "no crashes or gpu resets this week";
+}
+
+/** Live CPU/GPU numbers every 2 s, only while System or Overview is on screen in a visible window. */
+function setLive(on) {
+  on = on && !document.hidden;
+  if (!on) { clearTimeout(liveTimer); liveTimer = null; return; }
+  if (liveTimer) return;
+  const tick = async () => {
+    try { lastLive = await call("system.live"); renderLive(); } catch { /* next tick */ }
+    if (liveTimer) liveTimer = setTimeout(tick, 2000);
+  };
+  liveTimer = setTimeout(tick, 0);
+}
+document.addEventListener("visibilitychange", () => setLive(isVisible("system") || isVisible("overview")));
+
+function renderLive() {
+  const l = lastLive || {};
+  const tile = (label, value, unit) => h("div", { class: "card live" }, h("div", { class: "card-title" }, label),
+    h("div", { class: "live-val" }, value == null ? "—" : value, h("small", {}, value == null ? "" : unit)));
+  $("#sysLive").replaceChildren(
+    tile("cpu load", l.cpuLoad == null ? null : Math.round(l.cpuLoad), "%"),
+    tile("cpu clock", l.cpuMhz == null ? null : (l.cpuMhz / 1000).toFixed(2), " GHz"),
+    tile("gpu temp", l.gpuTempC == null ? null : Math.round(l.gpuTempC), " °C"),
+    tile("gpu load", l.gpuLoad == null ? null : Math.round(l.gpuLoad), "%"));
+  renderOverviewSystem();
+}
+
+function renderOverviewSystem() {
+  if (!state) return;
+  const parts = [stabilitySummary(state.stability)];
+  if (lastLive?.gpuTempC != null) parts.push(`gpu ${Math.round(lastLive.gpuTempC)} °C`);
+  if (lastLive?.cpuLoad != null) parts.push(`cpu ${Math.round(lastLive.cpuLoad)}%`);
+  $("#ovSystemBody").textContent = parts.filter(Boolean).join(" · ");
+}
+
 // ---------------------------------------------------------------- theme
 /** Canvases are drawn with the theme's colours, so they are redrawn when it changes. */
 window.addEventListener("hub:theme", () => {
@@ -969,4 +1085,5 @@ call("settings.load").then((s) => {
   applyTheme(appearance);
 }).catch(() => applyTheme({}));
 $$("input[type=range]").forEach(paintRange);
+setLive(isVisible("overview"));
 call("state").then(onState).catch(() => {});

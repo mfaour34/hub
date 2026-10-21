@@ -8,6 +8,8 @@ public sealed class TrayContext : ApplicationContext
     readonly AppSettings _settings = AppSettings.Load();
     readonly DeviceManager _devices;
     readonly AudioService _audio;
+    readonly SystemInfo.StabilityWatcher _stability;
+    readonly SystemInfo.DeviceWatcher _usb;
     readonly System.Windows.Forms.Timer _audioRetry;
     readonly Bridge _bridge;
     readonly NotifyIcon _tray;
@@ -28,7 +30,9 @@ public sealed class TrayContext : ApplicationContext
 
         _devices = new DeviceManager(_settings);
         _audio = new AudioService(_settings);
-        _bridge = new Bridge(_devices, _audio, _settings);
+        _stability = new SystemInfo.StabilityWatcher(Path.Combine(AppSettings.DataDir, "stability.jsonl"));
+        _usb = new SystemInfo.DeviceWatcher(Path.Combine(AppSettings.DataDir, "devices.jsonl"), KnownKind);
+        _bridge = new Bridge(_devices, _audio, _settings, _stability, _usb);
         _devices.Changed += Refresh;
         _devices.Notice += msg => _tray!.ShowBalloonTip(5000, "Hub", msg, ToolTipIcon.Warning);
 
@@ -47,6 +51,11 @@ public sealed class TrayContext : ApplicationContext
         _tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ShowWindow(); };
         Refresh();
         _devices.Start();
+        var ui = SynchronizationContext.Current;
+        _stability.Changed += () => ui?.Post(_ => _window?.PushState(), null);
+        _stability.Start();
+        _usb.Changed += () => ui?.Post(_ => _window?.PushDevices(), null);
+        _usb.Start();
 
         // Hub audio comes back with Hub; if the output device isn't there yet (headset off at logon) keep trying.
         _ = Native.Sta.Run(() => { _audio.MigrateFromVoiceMeeter(); _audio.Resume(); });
@@ -157,7 +166,15 @@ public sealed class TrayContext : ApplicationContext
         _window?.Close();
         _audioRetry.Dispose();
         _devices.Dispose();
+        _stability.Dispose();
+        _usb.Dispose();
         Native.Sta.Run(_audio.Dispose).Wait(5000); // the default-device switch needs an STA thread
         base.ExitThreadCore();
     }
+
+    /// <summary>Hub's own devices by what they are (the mouse's macro-key collection would read as a keyboard).</summary>
+    string? KnownKind(string name) =>
+        _devices.MouseModel?.Name is { Length: > 0 } m && name.Contains(m, StringComparison.OrdinalIgnoreCase) ? "mouse"
+        : _devices.HeadsetModel?.Name is { Length: > 0 } h && name.Contains(h, StringComparison.OrdinalIgnoreCase) ? "headset"
+        : null;
 }

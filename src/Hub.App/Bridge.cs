@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using Hub.App.Native;
 using Hub.Core.Audio;
 using Hub.Core.Devices;
+using Hub.Core.Diagnostics;
 using Hub.Core.Logitech;
 using Hub.Core.Razer;
 using Hub.Core.Ui;
@@ -11,7 +12,7 @@ using Microsoft.Win32;
 namespace Hub.App;
 
 /// <summary>Request/response bridge between the WebView2 UI (wwwroot/app.js) and the device/audio services.</summary>
-public sealed class Bridge(DeviceManager devices, AudioService audio, AppSettings settings)
+public sealed class Bridge(DeviceManager devices, AudioService audio, AppSettings settings, SystemInfo.StabilityWatcher stability, SystemInfo.DeviceWatcher usb)
 {
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -26,6 +27,8 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
             else key.DeleteValue("Hub", throwOnMissingValue: false);
         }
     }
+
+    public static string DevicesEventJson() => """{"event":"devices"}""";
 
     public string StateJson() => JsonSerializer.Serialize(new { @event = "state", data = State() }, Json);
 
@@ -53,6 +56,7 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
         headsetColor = settings.HeadsetColor,
         devicePictures = settings.DevicePictures == "drawing" ? "drawing" : "photo",
         audioSummary = audio.Summary(),
+        stability = StabilityJson(),
     };
 
     /// <summary>Handles one message {id, cmd, args} and returns the JSON reply.</summary>
@@ -223,6 +227,38 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
             case "audio.setOutput": await Sta.Run(() => audio.SetOutput(a["id"]?.GetValue<string>())); return null;
             case "audio.setMic": await Sta.Run(() => audio.SetMic(a["id"]?.GetValue<string>())); return null;
 
+            // ---------------- system ----------------
+            case "system.specs":
+                return await Task.Run(async () =>
+                {
+                    var sections = SystemInfo.Specs.Read(await MouseInfo(), await HeadsetInfo());
+                    return new
+                    {
+                        sections = sections.Where(s => s.Rows.Count > 0).Select(s => new { title = s.Title, rows = s.Rows.Select(r => new { label = r.Label, value = r.Value }) }),
+                        text = SpecsText.Format(sections),
+                    };
+                });
+            case "system.live":
+                return await Task.Run(() =>
+                {
+                    var r = SystemInfo.Live.Read();
+                    return new { cpuLoad = r.CpuLoad, cpuMhz = r.CpuMhz, gpuTempC = r.GpuTempC, gpuLoad = r.GpuLoad };
+                });
+            case "system.events":
+                return stability.Log.Recent(DateTimeOffset.Now).Select(e => new
+                {
+                    kind = e.Kind, title = e.Title, detail = e.Detail, time = e.Time.ToString("o"), log = e.Log, recordId = e.RecordId,
+                });
+            case "system.devices":
+                return await Task.Run(() => new
+                {
+                    connected = usb.Connected().Select(d => new { name = d.Name, kind = d.Kind }),
+                    activity = usb.Log.Recent(DateTimeOffset.Now).Select(e => new { time = e.Time.ToString("o"), action = e.Action, name = e.Name, kind = e.Kind }),
+                });
+            case "system.openEvent":
+                OpenEventViewer(a["log"]!.GetValue<string>(), a["recordId"]!.GetValue<long>());
+                return null;
+
             // ---------------- settings ----------------
             case "settings.load":
                 return new
@@ -248,6 +284,38 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
     }
 
     // ---------------- helpers ----------------
+
+    /// <summary>7-day counts for Overview and the System page heading.</summary>
+    object StabilityJson()
+    {
+        var recent = stability.Log.Recent(DateTimeOffset.Now);
+        int Count(string kind) => recent.Count(e => e.Kind == kind);
+        return new { gpuResets = Count("gpu-reset"), hardwareErrors = Count("hardware-error"), bluescreens = Count("bluescreen"), restarts = Count("unexpected-restart") };
+    }
+
+    async Task<SystemInfo.DeviceInfo> MouseInfo()
+    {
+        if (devices.Mouse is not { } m) return new(null, null);
+        string? fw = null;
+        try { fw = await Task.Run(m.GetFirmwareVersion).WaitAsync(TimeSpan.FromSeconds(2)); } catch (Exception) { }
+        return new(devices.MouseModel?.FullName, fw);
+    }
+
+    async Task<SystemInfo.DeviceInfo> HeadsetInfo()
+    {
+        if (devices.Headset is not { HeadsetConnected: true } h) return new(devices.Headset is null ? null : devices.HeadsetModel?.FullName, null);
+        string? fw = null;
+        try { fw = await h.GetFirmwareAsync().WaitAsync(TimeSpan.FromSeconds(2)); } catch (Exception) { }
+        return new(devices.HeadsetModel?.FullName, fw);
+    }
+
+    /// <summary>Event Viewer filtered to one record (System or Application only: they are the logs Hub reads).</summary>
+    static void OpenEventViewer(string log, long recordId)
+    {
+        if (log is not ("System" or "Application")) throw new ArgumentException("Unknown log");
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("eventvwr.exe",
+            $"/c:{log} /f:\"*[System[EventRecordID={recordId}]]\"") { UseShellExecute = true });
+    }
 
     /// <summary>Theme fields of settings.save; each is optional and an invalid value falls back to the default.</summary>
     void SaveAppearance(JsonObject a)

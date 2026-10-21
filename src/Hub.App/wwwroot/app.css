@@ -348,5 +348,40 @@ img.drawing { filter: none !important; }
 .theme-edit input[type=color]::-webkit-color-swatch { border: 0; border-radius: 2px; }
 .theme-edit select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 3px; padding: 3px 6px; font: 12px var(--label-font); }
 .settings-sub { font: 12px var(--label-font); color: var(--muted); text-transform: lowercase; margin: 18px 0 6px; }
+/* ---------- system ---------- */
+.live-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px; }
+.live-strip .card { margin: 0; }
+.live-val { font-size: 34px; font-weight: 600; letter-spacing: -.03em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.live-val small { font: 400 13px var(--label-font); color: var(--muted); letter-spacing: 0; }
+.specs-head { margin: 22px 0 8px; }
+.specs-head .card-title { margin: 0; }
+.specs { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; align-items: start; }
+.specs .card { margin: 0; }
+.spec-row { display: grid; grid-template-columns: 96px 1fr; gap: 12px; padding: 5px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.spec-row:first-of-type { border-top: 0; }
+.spec-row span { color: var(--muted); font: 12px var(--label-font); padding-top: 1px; }
+.spec-row b { font-weight: 500; overflow-wrap: anywhere; user-select: text; }
+.ev-day + .ev-day { margin-top: 12px; }
+.ev-date { font: 12px var(--label-font); color: var(--muted); margin-bottom: 4px; }
+.ev-date::before { content: "— "; }
+.ev-row { display: grid; grid-template-columns: 52px 104px 1fr auto; gap: 12px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); color: var(--text); }
+.ev-time { font: 12.5px var(--label-font); font-variant-numeric: tabular-nums; }
+.ev-kind { font: 11.5px var(--label-font); justify-self: start; padding: 2px 7px; border-radius: 3px; border: 1px solid currentColor; }
+.ev-kind.gpu-reset, .ev-kind.unexpected-restart { color: var(--warn); }
+.ev-kind.hardware-error, .ev-kind.bluescreen { color: var(--bad); }
+.ev-text { display: flex; flex-direction: column; min-width: 0; }
+.ev-text b { font-weight: 500; }
+.ev-text small { color: var(--muted); font: 11.5px var(--label-font); }
+.devices-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+.devices-grid .settings-sub { margin-top: 0; }
+.dev-row { display: grid; grid-template-columns: auto auto 1fr; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); color: var(--text); font-size: 13px; }
+#sysConnected .dev-row { grid-template-columns: 90px 1fr; }
+.dev-row:first-child { border-top: 0; }
+.dev-kind { font: 11.5px var(--label-font); color: var(--muted); }
+.dev-action { font: 11.5px var(--label-font); }
+.dev-action.connected { color: var(--good); }
+.dev-action.disconnected { color: var(--muted); }
+.dev-action.reconnected { color: var(--warn); }
+@media (max-width: 1100px) { .live-strip { grid-template-columns: repeat(2, 1fr); } .devices-grid { grid-template-columns: 1fr; } }
 [hidden] { display: none !important; }
 .about { margin-top: 14px; }

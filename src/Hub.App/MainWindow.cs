@@ -22,6 +22,9 @@ public sealed class MainWindow : Form
         StartPosition = FormStartPosition.CenterScreen;
         Controls.Add(_web);
         HandleCreated += (_, _) => UseDarkTitleBar();
+        // WebView2 only reports the page hidden when the control is; minimizing doesn't hide it by itself, and the
+        // page uses that to stop its live CPU/GPU readings
+        Resize += (_, _) => { if (_web.CoreWebView2 is not null) _web.Visible = WindowState != FormWindowState.Minimized; };
         bridge.AppearanceChanged += () => { if (IsHandleCreated && !IsDisposed) BeginInvoke(ApplyWindowColours); };
         Load += async (_, _) => await InitAsync();
     }
@@ -75,6 +78,12 @@ public sealed class MainWindow : Form
     public void PushState()
     {
         if (_web.CoreWebView2 is { } core) core.PostWebMessageAsJson(_bridge.StateJson());
+    }
+
+    /// <summary>Tells the page a USB device came or went, so the System page's devices pane refreshes.</summary>
+    public void PushDevices()
+    {
+        if (_web.CoreWebView2 is { } core) core.PostWebMessageAsJson(Bridge.DevicesEventJson());
     }
 
     [DllImport("dwmapi.dll")]
