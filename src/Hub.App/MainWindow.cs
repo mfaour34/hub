@@ -8,19 +8,21 @@ namespace Hub.App;
 public sealed class MainWindow : Form
 {
     readonly Bridge _bridge;
-    readonly WebView2 _web = new() { Dock = DockStyle.Fill, DefaultBackgroundColor = Color.FromArgb(0x0d, 0x0f, 0x14) };
+    readonly WebView2 _web = new() { Dock = DockStyle.Fill };
 
     public MainWindow(Bridge bridge, Icon icon)
     {
         _bridge = bridge;
         Text = "Hub";
         Icon = icon;
-        BackColor = Color.FromArgb(0x0d, 0x0f, 0x14);
+        BackColor = bridge.WindowBackground;
+        _web.DefaultBackgroundColor = bridge.WindowBackground;
         Size = new Size(1280, 820);
         MinimumSize = new Size(960, 640);
         StartPosition = FormStartPosition.CenterScreen;
         Controls.Add(_web);
         HandleCreated += (_, _) => UseDarkTitleBar();
+        bridge.AppearanceChanged += () => { if (IsHandleCreated && !IsDisposed) BeginInvoke(ApplyWindowColours); };
         Load += async (_, _) => await InitAsync();
     }
 
@@ -36,6 +38,8 @@ public sealed class MainWindow : Form
 #if !DEBUG
         core.Settings.AreDevToolsEnabled = false;
 #endif
+        // the page starts in its theme instead of flashing the stylesheet's default before settings arrive
+        await core.AddScriptToExecuteOnDocumentCreatedAsync($"window.__hubAppearance = {_bridge.AppearanceJson()};");
         core.SetVirtualHostNameToFolderMapping("hub.app", Path.Combine(AppContext.BaseDirectory, "wwwroot"), CoreWebView2HostResourceAccessKind.DenyCors);
         core.WebMessageReceived += async (_, e) =>
         {
@@ -76,11 +80,24 @@ public sealed class MainWindow : Form
     [DllImport("dwmapi.dll")]
     static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
+    /// <summary>Window, WebView and title bar in the theme's background (after an appearance change too).</summary>
+    void ApplyWindowColours()
+    {
+        BackColor = _bridge.WindowBackground;
+        _web.DefaultBackgroundColor = BackColor;
+        UseDarkTitleBar();
+    }
+
+    /// <summary>Title bar in the theme's background with readable text (caption colours are Windows 11 only).</summary>
     void UseDarkTitleBar()
     {
-        int on = 1;
+        var bg = _bridge.WindowBackground;
+        bool dark = bg.GetBrightness() < 0.5f;
+        int on = dark ? 1 : 0;
         DwmSetWindowAttribute(Handle, 20, ref on, sizeof(int)); // DWMWA_USE_IMMERSIVE_DARK_MODE
-        int caption = 0x00140F0D; // COLORREF (BGR) of #0d0f14
-        DwmSetWindowAttribute(Handle, 35, ref caption, sizeof(int)); // DWMWA_CAPTION_COLOR (Windows 11)
+        int caption = bg.R | bg.G << 8 | bg.B << 16; // COLORREF is BGR
+        DwmSetWindowAttribute(Handle, 35, ref caption, sizeof(int)); // DWMWA_CAPTION_COLOR
+        int text = dark ? 0x00E2E9EC : 0x001B1B1B;
+        DwmSetWindowAttribute(Handle, 36, ref text, sizeof(int)); // DWMWA_TEXT_COLOR
     }
 }

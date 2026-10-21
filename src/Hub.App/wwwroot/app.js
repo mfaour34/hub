@@ -110,10 +110,28 @@ function onState(s) {
   if (prev && !prev.mouse.connected && s.mouse.connected && isVisible("mouse")) loadMouse();
   if (prev && !prev.headset.on && s.headset.on && isVisible("headset")) loadHeadset();
 }
-/** Image for a model: its render in the chosen colour (first colour if that one doesn't exist), else the silhouette. */
-function renderSrc(model, color, generic) {
-  if (!model.render) return generic;
+/** Image for a model: its render in the chosen colour (first colour if that one doesn't exist), else a drawing. */
+function renderSrc(model, color, kind) {
+  if (!model.render || state.devicePictures === "drawing") return drawingSrc(kind);
   return `${model.render}-${model.colors.includes(color) ? color : model.colors[0]}.png`;
+}
+
+/** Line drawings of a mouse and a headset in the current theme's colours (an SVG data URL). */
+function drawingSrc(kind) {
+  const ink = token("--text"), fill = token("--panel-2"), accent = token("--accent");
+  const svg = kind === "mouse"
+    ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 154 307">
+        <path d="M77 4C33 4 8 40 8 96v118c0 52 30 89 69 89s69-37 69-89V96C146 40 121 4 77 4z" fill="${fill}" stroke="${ink}" stroke-width="2.5"/>
+        <path d="M77 6v120M10 126h134" stroke="${ink}" stroke-width="2" fill="none"/>
+        <rect x="69" y="40" width="16" height="40" rx="3" fill="${accent}"/></svg>`
+    : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 628 800">
+        <path d="M110 430V330C110 170 200 60 314 60s204 110 204 270v100" fill="none" stroke="${ink}" stroke-width="10" stroke-linecap="round"/>
+        <rect x="40" y="380" width="160" height="250" rx="40" fill="${fill}" stroke="${ink}" stroke-width="8"/>
+        <rect x="428" y="380" width="160" height="250" rx="40" fill="${fill}" stroke="${ink}" stroke-width="8"/>
+        <rect x="88" y="440" width="64" height="130" rx="10" fill="${accent}"/><rect x="476" y="440" width="64" height="130" rx="10" fill="${accent}"/>
+        <path d="M120 600c0 90 50 140 150 150" fill="none" stroke="${ink}" stroke-width="10" stroke-linecap="round"/>
+        <circle cx="282" cy="752" r="20" fill="${accent}"/></svg>`;
+  return "data:image/svg+xml," + encodeURIComponent(svg);
 }
 
 /**
@@ -122,12 +140,14 @@ function renderSrc(model, color, generic) {
  */
 function applyModels() {
   const mm = state.mouse.model, hm = state.headset.model;
-  $$(".mouse-img").forEach((img) => (img.src = renderSrc(mm, state.mouseColor, "mouse-generic.svg")));
-  $$(".headset-img").forEach((img) => (img.src = renderSrc(hm, state.headsetColor, "headset-generic.svg")));
+  const drawing = state.devicePictures === "drawing";
+  $$(".mouse-img").forEach((img) => { img.src = renderSrc(mm, state.mouseColor, "mouse"); img.classList.toggle("drawing", drawing || !mm.render); });
+  $$(".headset-img").forEach((img) => { img.src = renderSrc(hm, state.headsetColor, "headset"); img.classList.toggle("drawing", drawing || !hm.render); });
   $("#ovMouseName").textContent = mm.name; $("#mouseTitle").textContent = mm.fullName;
   $("#ovHeadsetName").textContent = hm.name; $("#headsetTitle").textContent = hm.fullName;
-  $("#mouseColorRow").hidden = mm.colors.length < 2;
-  $("#headsetColorRow").hidden = hm.colors.length < 2;
+  $("#picturesBlock").hidden = !mm.render && !hm.render;
+  $("#mouseColorRow").hidden = drawing || mm.colors.length < 2;
+  $("#headsetColorRow").hidden = drawing || hm.colors.length < 2;
 
   if (mouse) renderCallouts(); // the button set comes with the model
   const mc = mm.caps;
@@ -164,7 +184,7 @@ function renderSide() {
 }
 
 function ring(el, b, label) {
-  const color = !b ? "#3a4050" : b.percent <= state.alertPercent ? "var(--bad)" : b.percent <= 40 ? "var(--warn)" : "var(--good)";
+  const color = !b ? "var(--line)" : b.percent <= state.alertPercent ? "var(--bad)" : b.percent <= 40 ? "var(--warn)" : "var(--good)";
   el.style.setProperty("--p", b ? b.percent : 0);
   el.style.setProperty("--c", color);
   el.replaceChildren(h("span", {}, b ? b.percent + "%" : "—", h("small", {}, label)));
@@ -395,15 +415,14 @@ const cy = (v) => CV.y0 - (v / CV.yMax) * (CV.y0 - CV.y1);
 function drawCurve() {
   const canvas = $("#curve"), g = canvas.getContext("2d");
   g.clearRect(0, 0, canvas.width, canvas.height);
-  g.font = "13px Segoe UI"; g.fillStyle = "#8b93a7"; g.strokeStyle = "#232838"; g.lineWidth = 1;
+  g.font = `13px ${token("--label-font")}`; g.fillStyle = token("--muted"); g.strokeStyle = token("--line"); g.lineWidth = 1;
   for (let v = 0; v <= 105; v += 15) { g.beginPath(); g.moveTo(cx(v), CV.y1); g.lineTo(cx(v), CV.y0); g.stroke(); g.fillText(v, cx(v) - 6, CV.y0 + 20); }
   for (let v = 0; v <= 2; v += 0.25) { g.beginPath(); g.moveTo(CV.x0, cy(v)); g.lineTo(CV.x1, cy(v)); g.stroke(); g.fillText(v.toFixed(2), 20, cy(v) + 4); }
   g.fillText("ratio", 20, CV.y1 - 4);
   g.textAlign = "right"; g.fillText("input speed (counts/ms)", CV.x1, CV.y1 - 4); g.textAlign = "left";
 
   const pts = curvePoints(), f = spline(pts), maxX = pts[pts.length - 1].x;
-  const grad = g.createLinearGradient(CV.x0, 0, CV.x1, 0);
-  grad.addColorStop(0, "#6d5bff"); grad.addColorStop(1, "#1ec8e8");
+  const grad = token("--accent");
   g.beginPath();
   for (let v = 0; v <= CV.xMax; v += 0.25) {
     const yv = v <= maxX ? f(v) : pts[pts.length - 1].y;
@@ -414,8 +433,8 @@ function drawCurve() {
   g.globalAlpha = 0.12; g.fillStyle = grad; g.fill(); g.globalAlpha = 1;
 
   if (curveMode === 3) for (const p of pts) {
-    g.beginPath(); g.arc(cx(p.x), cy(p.y), 7, 0, Math.PI * 2); g.fillStyle = "#fff"; g.fill();
-    g.lineWidth = 3; g.strokeStyle = "#6d5bff"; g.stroke();
+    g.beginPath(); g.arc(cx(p.x), cy(p.y), 7, 0, Math.PI * 2); g.fillStyle = token("--panel"); g.fill();
+    g.lineWidth = 3; g.strokeStyle = token("--accent"); g.stroke();
   }
 }
 
@@ -523,7 +542,8 @@ $("#nr").addEventListener("change", () => act("Noise reduction", () => call("hea
 
 // ---------------------------------------------------------------- audio
 let audio = null, audioError = null;
-const CH_COLORS = { game: "#6d5bff", chat: "#3ddc97", media: "#1ec8e8" };
+/** A channel's colour in the current theme. */
+const chColor = (id) => token(`--ch-${id}`);
 
 async function loadAudio() {
   try { audio = await call("audio.load"); } catch (err) { toast("Audio: " + err.message, true); return; }
@@ -641,7 +661,7 @@ function renderChannel(c) {
     clearTimeout(tt);
     tt = setTimeout(() => call("audio.setTame", { channel: c.id, value: +tame.value }).then(() => (c.tame = +tame.value)).catch((e) => toast(e.message, true)), 150);
   });
-  const dot = h("i"); dot.style.background = CH_COLORS[c.id];
+  const dot = h("i"); dot.style.background = `var(--ch-${c.id})`;
   const active = c.filters.filter((f) => f.enabled).length;
   return h("div", { class: "card channel", "data-ch": c.id },
     h("h2", {}, dot, c.name, c.custom ? h("span", { class: "badge-custom" }, "Custom") : null),
@@ -686,7 +706,7 @@ function plotEq(canvas, filters, { fs = 48000, gain = 0, color, range = 15, deta
   const g = canvas.getContext("2d"), W = canvas.width, H = canvas.height, font = detail ? 15 : 18;
   g.clearRect(0, 0, W, H);
   const fx = (f) => (Math.log10(f / 20) / 3) * W, dy = (db) => H / 2 - (db / range) * (H / 2 - 12);
-  g.strokeStyle = "#232838"; g.fillStyle = "#6b7388"; g.font = `${font}px Segoe UI`; g.lineWidth = 1;
+  g.strokeStyle = token("--line"); g.fillStyle = token("--muted"); g.font = `${font}px ${token("--label-font")}`; g.lineWidth = 1;
   const marks = detail ? [50, 100, 200, 500, 1000, 2000, 5000, 10000] : [100, 1000, 10000];
   for (const f of marks) { g.beginPath(); g.moveTo(fx(f), 0); g.lineTo(fx(f), H); g.stroke(); g.fillText(f >= 1000 ? f / 1000 + "k" : f, fx(f) + 4, H - 8); }
   for (const db of detail ? [-12, -6, 0, 6, 12] : [-12, -6, 0, 6, 12]) {
@@ -696,8 +716,9 @@ function plotEq(canvas, filters, { fs = 48000, gain = 0, color, range = 15, deta
   const live = filters.filter((f) => usable(f, fs));
   const N = detail ? 500 : 300, curve = (fn) => { g.beginPath(); for (let i = 0; i <= N; i++) { const f = 20 * Math.pow(1000, i / N), y = dy(fn(f)); i ? g.lineTo(fx(f), y) : g.moveTo(fx(f), y); } };
   if (detail) {
-    g.lineWidth = 1.5; g.strokeStyle = "rgba(139,147,167,.35)";
+    g.lineWidth = 1.5; g.strokeStyle = token("--muted"); g.globalAlpha = 0.4;
     for (const flt of live) { curve((f) => biquadDb(flt, f, fs)); g.stroke(); }
+    g.globalAlpha = 1;
   }
   curve((f) => gain + live.reduce((s, flt) => s + biquadDb(flt, f, fs), 0));
   g.strokeStyle = color; g.lineWidth = detail ? 3 : 3.5; g.stroke();
@@ -705,7 +726,7 @@ function plotEq(canvas, filters, { fs = 48000, gain = 0, color, range = 15, deta
 
 function drawResponse(c) {
   const canvas = $(`.channel[data-ch="${c.id}"] canvas`);
-  if (canvas) plotEq(canvas, c.filters, { fs: c.rate, gain: c.preamp, color: CH_COLORS[c.id] });
+  if (canvas) plotEq(canvas, c.filters, { fs: c.rate, gain: c.preamp, color: chColor(c.id) });
 }
 
 // ----- advanced editor: built-in presets are read-only, edits always go to a custom profile
@@ -773,7 +794,7 @@ function advChanged() {
   $("#advGainVal").textContent = (d.gain > 0 ? "+" : "") + d.gain.toFixed(1) + " dB";
   $("#advHeadroom").disabled = d.limiter;
   $("#advHeadroom").closest(".row").classList.toggle("off", d.limiter);
-  plotEq($("#advCurve"), d.filters, { fs: d.rate, gain: d.gain, color: CH_COLORS[ch.id], range: 18, detail: true });
+  plotEq($("#advCurve"), d.filters, { fs: d.rate, gain: d.gain, color: chColor(ch.id), range: 18, detail: true });
   const def = ch.defaults, notes = [];
   notes.push(d.limiter ? "EQ runs at the gain above; the limiter catches peaks above 0 dBFS."
     : d.autoHeadroom ? "No limiter: the gain is lowered by the EQ's peak boost so it can't clip." : "No limiter and no headroom: loud boosted sounds can clip.");
@@ -839,8 +860,12 @@ $("#chatMix").addEventListener("input", () => {
 $("#chatMix").addEventListener("dblclick", () => { setRange($("#chatMix"), 0); updateChatMixLabel(); call("audio.setChatMix", { value: 0 }); });
 
 // ---------------------------------------------------------------- settings
+let appearance = null; // { theme, customTheme, followWindows, devicePictures }
+
 async function loadSettings() {
   const s = await call("settings.load");
+  appearance = { theme: s.theme, customTheme: s.customTheme, followWindows: s.followWindows, devicePictures: s.devicePictures };
+  renderAppearance();
   $("#autostart").checked = s.autostart;
   setRange($("#alertPct"), s.alertPercent); $("#alertVal").textContent = s.alertPercent + "%";
   $("#normalMode").checked = s.restoreNormalMode;
@@ -849,16 +874,99 @@ async function loadSettings() {
   segmented($("#mouseColor"), colors(state.mouse.model), s.mouseColor, (v) => { state.mouseColor = v; applyModels(); saveSettings(); });
   segmented($("#headsetColor"), colors(state.headset.model), s.headsetColor, (v) => { state.headsetColor = v; applyModels(); saveSettings(); });
 }
-const saveSettings = () => act("Settings", () => call("settings.save", {
+const saveSettings = (message = "Settings saved") => act("Settings", () => call("settings.save", {
   autostart: $("#autostart").checked, alertPercent: +$("#alertPct").value, restoreNormalMode: $("#normalMode").checked,
   mouseColor: $("#mouseColor .active")?.textContent.toLowerCase() || "black",
   headsetColor: $("#headsetColor .active")?.textContent.toLowerCase() || "black",
-}), "Settings saved");
-$("#autostart").addEventListener("change", saveSettings);
-$("#normalMode").addEventListener("change", saveSettings);
+  ...(appearance || {}), windowBackground: token("--bg"),
+}), message);
+
+// ----- appearance: theme presets, my theme, device pictures
+const THEME_EDIT = [["bg", "background"], ["side", "sidebar"], ["panel", "panels"], ["text", "text"],
+  ["muted", "secondary text"], ["accent", "accent"], ["line", "lines"]];
+
+/** The colours "my theme" stores: only the editable ones, so derived colours (button text etc.) stay readable. */
+const editable = (t) => Object.fromEntries([...THEME_EDIT.map(([k]) => k), "labelFont"].map((k) => [k, t[k]]));
+
+function renderThemeSwatches() {
+  const a = appearance;
+  $("#themes").replaceChildren(...Object.keys(THEME_NAMES).map((id) => {
+    const t = id === "custom" ? resolveTheme({ theme: "custom", customTheme: a.customTheme }) : THEMES[id];
+    const sw = h("div", { class: "sw" }, ...[t.bg, t.panel, t.accent].map((c) => { const i = h("i"); i.style.background = c; return i; }));
+    return h("button", { class: "theme-swatch" + (a.theme === id ? " active" : ""), onclick: () => setAppearance({ theme: id }) }, sw, THEME_NAMES[id]);
+  }));
+}
+
+function renderAppearance() {
+  const a = appearance, current = resolveTheme(a);
+  renderThemeSwatches();
+  const follow = canFollowWindows(a.theme);
+  $("#followWindows").checked = a.followWindows; $("#followWindows").disabled = !follow;
+  $("#followHint").textContent = follow ? "" : "instrument only";
+  $("#themeEdit").replaceChildren(...THEME_EDIT.map(([key, label]) => {
+    const input = h("input", { type: "color", value: current[key] });
+    input.addEventListener("input", () => editTheme(key, input.value));
+    return h("label", {}, label, input);
+  }), (() => {
+    const select = h("select", {}, ...[["mono", "mono"], ["sans", "sans"]].map(([v, l]) => h("option", { value: v, ...(current.labelFont === v ? { selected: "" } : {}) }, l)));
+    select.addEventListener("change", () => editTheme("labelFont", select.value));
+    return h("label", {}, "labels", select);
+  })());
+  segmented($("#devicePictures"), [{ value: "photo", label: "photo" }, { value: "drawing", label: "drawing" }], a.devicePictures,
+    (v) => setAppearance({ devicePictures: v }));
+}
+
+let appearanceTimer;
+/** Applies a change at once and saves it shortly after (colour pickers fire many events). */
+function setAppearance(change, { rerender = true } = {}) {
+  appearance = { ...appearance, ...change };
+  state.devicePictures = appearance.devicePictures;
+  applyTheme(appearance);
+  if (rerender) renderAppearance();
+  clearTimeout(appearanceTimer);
+  appearanceTimer = setTimeout(() => saveSettings(null), 300);
+}
+
+/** Editing a colour turns the current look into "my theme" and changes it there. */
+function editTheme(key, value) {
+  if (appearance.theme !== "custom" && Object.keys(appearance.customTheme || {}).length
+      && !confirm(`Start "my theme" over from ${THEME_NAMES[appearance.theme]}? Your current "my theme" will be replaced.`)) {
+    renderAppearance(); // put the picker back to the preset's colour
+    return;
+  }
+  const base = appearance.theme === "custom" ? appearance.customTheme : editable(resolveTheme(appearance));
+  // the editor stays in place (re-rendering it would close the open colour picker); only the swatches change
+  setAppearance({ theme: "custom", followWindows: false, customTheme: { ...base, [key]: value } }, { rerender: false });
+  renderThemeSwatches();
+  $("#followWindows").checked = false; $("#followWindows").disabled = true; $("#followHint").textContent = "instrument only";
+}
+
+$("#followWindows").addEventListener("change", () => setAppearance({ followWindows: $("#followWindows").checked }));
+$("#themeReset").addEventListener("click", () => {
+  const preset = appearance.theme === "custom" ? "instrument-light" : appearance.theme;
+  // what is on screen (with Follow Windows that can be the dark version of the chosen preset)
+  const from = appearance.theme === "custom" ? THEMES[preset] : resolveTheme(appearance);
+  setAppearance({ customTheme: editable(from) });
+  toast("My theme reset to " + THEME_NAMES[preset]);
+});
+$("#autostart").addEventListener("change", () => saveSettings());
+$("#normalMode").addEventListener("change", () => saveSettings());
 $("#alertPct").addEventListener("input", () => ($("#alertVal").textContent = $("#alertPct").value + "%"));
-$("#alertPct").addEventListener("change", saveSettings);
+$("#alertPct").addEventListener("change", () => saveSettings());
+
+// ---------------------------------------------------------------- theme
+/** Canvases are drawn with the theme's colours, so they are redrawn when it changes. */
+window.addEventListener("hub:theme", () => {
+  if (state) applyModels();
+  if ($("#curve").offsetParent) drawCurve();
+  if (audio) audio.channels.forEach((c) => drawResponse(c));
+  if (adv && $("#adv").open) advChanged();
+});
 
 // ---------------------------------------------------------------- boot
+call("settings.load").then((s) => {
+  appearance = { theme: s.theme, customTheme: s.customTheme, followWindows: s.followWindows, devicePictures: s.devicePictures };
+  applyTheme(appearance);
+}).catch(() => applyTheme({}));
 $$("input[type=range]").forEach(paintRange);
 call("state").then(onState).catch(() => {});

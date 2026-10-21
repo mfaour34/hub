@@ -53,6 +53,17 @@ public sealed class AppSettings
     /// <summary>Colour variant of the headset picture, when the catalog has more than one.</summary>
     public string HeadsetColor { get; set; } = "black";
 
+    /// <summary>UI theme preset (Hub.Core.Ui.ThemeTokens.Presets); "custom" = <see cref="CustomTheme"/>.</summary>
+    public string Theme { get; set; } = Hub.Core.Ui.ThemeTokens.DefaultPreset;
+    /// <summary>The user's own theme: token name → value, over Instrument light.</summary>
+    public Dictionary<string, string> CustomTheme { get; set; } = [];
+    /// <summary>Instrument follows Windows' light/dark app mode.</summary>
+    public bool FollowWindowsTheme { get; set; }
+    /// <summary>"photo" (a model's picture, where the catalog has one) or "drawing" (line drawings in the theme's colours).</summary>
+    public string DevicePictures { get; set; } = "photo";
+    /// <summary>The theme's background, used for the window before the page has loaded.</summary>
+    public string WindowBackground { get; set; } = "#dedbd3";
+
     /// <summary>Custom Dynamic Sensitivity control points (a gentle ramp to start from).</summary>
     public List<CurvePointDto> CustomCurve { get; set; } =
         [new(0, 1), new(10, 1.15), new(25, 1.3), new(50, 1.4), new(100, 1.4)];
@@ -97,7 +108,11 @@ public sealed class AppSettings
             if (File.Exists(FilePath))
                 return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath), Json) ?? new();
         }
-        catch (Exception) { }
+        catch (Exception)
+        {
+            // unreadable (e.g. hand-edited with a wrong type): keep a copy, since the next Save() replaces it with defaults
+            try { File.Copy(FilePath, FilePath + $".unreadable-{DateTime.Now:yyyyMMdd-HHmmss}", overwrite: true); } catch (Exception) { }
+        }
         return new();
     }
 

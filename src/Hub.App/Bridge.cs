@@ -5,6 +5,7 @@ using Hub.Core.Audio;
 using Hub.Core.Devices;
 using Hub.Core.Logitech;
 using Hub.Core.Razer;
+using Hub.Core.Ui;
 using Microsoft.Win32;
 
 namespace Hub.App;
@@ -50,6 +51,7 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
         alertPercent = settings.LowBatteryNotifyPercent,
         mouseColor = settings.MouseColor,
         headsetColor = settings.HeadsetColor,
+        devicePictures = settings.DevicePictures == "drawing" ? "drawing" : "photo",
         audioSummary = audio.Summary(),
     };
 
@@ -223,13 +225,22 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
 
             // ---------------- settings ----------------
             case "settings.load":
-                return new { version = Program.Version, autostart = Autostart, alertPercent = settings.LowBatteryNotifyPercent, restoreNormalMode = settings.RestoreMouseNormalMode, mouseColor = settings.MouseColor, headsetColor = settings.HeadsetColor };
+                return new
+                {
+                    version = Program.Version, autostart = Autostart, alertPercent = settings.LowBatteryNotifyPercent, restoreNormalMode = settings.RestoreMouseNormalMode,
+                    mouseColor = settings.MouseColor, headsetColor = settings.HeadsetColor,
+                    theme = ThemeTokens.IsPreset(settings.Theme) ? settings.Theme : ThemeTokens.DefaultPreset,
+                    customTheme = ThemeTokens.Sanitize(settings.CustomTheme),
+                    followWindows = settings.FollowWindowsTheme,
+                    devicePictures = settings.DevicePictures == "drawing" ? "drawing" : "photo",
+                };
             case "settings.save":
                 Autostart = a["autostart"]!.GetValue<bool>();
                 settings.LowBatteryNotifyPercent = a["alertPercent"]!.GetValue<int>();
                 settings.RestoreMouseNormalMode = a["restoreNormalMode"]!.GetValue<bool>();
                 settings.MouseColor = a["mouseColor"]?.GetValue<string>() is "white" ? "white" : "black";
                 settings.HeadsetColor = a["headsetColor"]?.GetValue<string>() is "white" ? "white" : "black";
+                SaveAppearance(a);
                 settings.Save();
                 return null;
         }
@@ -237,6 +248,39 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
     }
 
     // ---------------- helpers ----------------
+
+    /// <summary>Theme fields of settings.save; each is optional and an invalid value falls back to the default.</summary>
+    void SaveAppearance(JsonObject a)
+    {
+        if (a["theme"]?.GetValue<string>() is { } theme)
+            settings.Theme = ThemeTokens.IsPreset(theme) ? theme : ThemeTokens.DefaultPreset;
+        if (a["customTheme"] is JsonObject custom)
+            settings.CustomTheme = ThemeTokens.Sanitize(custom.Where(p => p.Value is JsonValue)
+                .ToDictionary(p => p.Key, p => p.Value!.ToString()));
+        if (a["followWindows"]?.GetValue<bool>() is { } follow) settings.FollowWindowsTheme = follow;
+        if (a["devicePictures"]?.GetValue<string>() is { } pictures) settings.DevicePictures = pictures == "drawing" ? "drawing" : "photo";
+        if (a["windowBackground"]?.GetValue<string>() is { } bg) settings.WindowBackground = ThemeTokens.IsColor(bg) ? bg.ToLowerInvariant() : "#dedbd3";
+        AppearanceChanged?.Invoke();
+    }
+
+    /// <summary>Raised after the page saves appearance settings (theme, pictures), so the window can follow.</summary>
+    public event Action? AppearanceChanged;
+
+    /// <summary>The window colour before the page paints (the theme's background).</summary>
+    public Color WindowBackground => ColorTranslator.FromHtml(
+        ThemeTokens.BackgroundFor(settings.Theme, settings.FollowWindowsTheme, WindowsUsesDarkApps(), settings.WindowBackground));
+
+    static bool WindowsUsesDarkApps() =>
+        Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1) is 0;
+
+    /// <summary>The page's appearance settings as JSON, injected before the page's first paint so it starts in its theme.</summary>
+    public string AppearanceJson() => JsonSerializer.Serialize(new
+    {
+        theme = ThemeTokens.IsPreset(settings.Theme) ? settings.Theme : ThemeTokens.DefaultPreset,
+        customTheme = ThemeTokens.Sanitize(settings.CustomTheme),
+        followWindows = settings.FollowWindowsTheme,
+        devicePictures = settings.DevicePictures == "drawing" ? "drawing" : "photo",
+    }, Json);
 
     /// <summary>
     /// The model the UI draws. While nothing is connected it shows the first catalogued model;

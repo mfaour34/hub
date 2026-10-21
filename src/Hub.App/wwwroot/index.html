@@ -8,10 +8,7 @@
 </head>
 <body>
   <aside class="sidebar">
-    <div class="brand">
-      <img src="logo.svg" alt="" width="34" height="34">
-      <span>Hub</span>
-    </div>
+    <div class="brand">hub<span>.</span></div>
     <nav id="nav">
       <button data-page="overview" class="active"><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z"/></svg>Overview</button>
       <button data-page="mouse"><svg viewBox="0 0 24 24"><path d="M12 2a6 6 0 0 0-6 6v8a6 6 0 0 0 12 0V8a6 6 0 0 0-6-6zm0 2v5M8 9h8" fill="none" stroke-width="2"/></svg>Mouse</button>
@@ -55,7 +52,7 @@
     <!-- MOUSE -->
     <section class="page" id="page-mouse">
       <header class="page-head">
-        <h1 id="mouseTitle">Mouse</h1>
+        <h1 id="mouseTitle" class="device">Mouse</h1>
         <div class="tabs" id="mouseTabs">
           <button data-tab="customize" class="active">Customize</button>
           <button data-tab="performance">Performance</button>
@@ -170,7 +167,7 @@
 
     <!-- HEADSET -->
     <section class="page" id="page-headset">
-      <header class="page-head"><h1 id="headsetTitle">Headset</h1><p class="sub" id="headsetSub"></p></header>
+      <header class="page-head"><h1 id="headsetTitle" class="device">Headset</h1><p class="sub" id="headsetSub"></p></header>
       <div class="offline" id="headsetOffline">Headset is off or the dongle is unplugged.</div>
       <div class="card hero">
         <div class="hero-art"><img src="headset-generic.svg" class="headset-img" alt=""></div>
@@ -245,16 +242,32 @@
     <section class="page" id="page-settings">
       <header class="page-head"><h1>Settings</h1></header>
       <div class="card narrow">
+        <div class="card-title">general</div>
         <div class="row between"><span>Start Hub with Windows</span>
           <label class="switch"><input type="checkbox" id="autostart"><span></span></label></div>
         <label class="field">Battery alert at or below <b id="alertVal"></b>
           <input type="range" id="alertPct" min="5" max="50" step="5"></label>
-        <div class="row between" id="mouseColorRow" hidden><span>Mouse colour</span>
-          <div class="segmented" id="mouseColor"></div></div>
-        <div class="row between" id="headsetColorRow" hidden><span>Headset colour</span>
-          <div class="segmented" id="headsetColor"></div></div>
         <div class="row between"><span>Return the mouse to onboard mode when its vendor app is closed</span>
           <label class="switch"><input type="checkbox" id="normalMode"><span></span></label></div>
+      </div>
+      <div class="card narrow" id="appearance">
+        <div class="card-title">appearance</div>
+        <div class="settings-sub">theme</div>
+        <div class="themes" id="themes"></div>
+        <div class="row between"><span>Follow Windows light/dark <small class="muted" id="followHint"></small></span>
+          <label class="switch"><input type="checkbox" id="followWindows"><span></span></label></div>
+        <div class="settings-sub">my theme</div>
+        <div class="theme-edit" id="themeEdit"></div>
+        <div class="row end"><button class="btn small" id="themeReset">reset to current preset</button></div>
+        <div id="picturesBlock">
+          <div class="settings-sub">device pictures</div>
+          <div class="row between"><span>Show the mouse and headset as</span>
+            <div class="segmented" id="devicePictures"></div></div>
+          <div class="row between" id="mouseColorRow" hidden><span>Mouse colour</span>
+            <div class="segmented" id="mouseColor"></div></div>
+          <div class="row between" id="headsetColorRow" hidden><span>Headset colour</span>
+            <div class="segmented" id="headsetColor"></div></div>
+        </div>
       </div>
       <p class="hint about" id="about"></p>
     </section>
@@ -308,6 +321,7 @@
 
   <div class="popover" id="popover"></div>
   <div class="toast" id="toast"></div>
+  <script src="themes.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
