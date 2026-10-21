@@ -121,10 +121,11 @@ public sealed class TrayContext : ApplicationContext
             if (lowBattery)
             {
                 float d = size * 0.5f;
-                using var ring = new SolidBrush(Color.FromArgb(0x0d, 0x0f, 0x14));
-                g.FillEllipse(ring, size - d - 1, size - d - 1, d + 1, d + 1);
-                using var badge = new SolidBrush(Color.FromArgb(0xff, 0x5d, 0x6c));
-                g.FillEllipse(badge, size - d, size - d, d - 1, d - 1);
+                // square like the logo's dot, in the theme's "bad" red, ringed in the tile's colour
+                using var ring = new SolidBrush(Color.FromArgb(0x1b, 0x1b, 0x1b));
+                g.FillRectangle(ring, size - d - 1, size - d - 1, d + 1, d + 1);
+                using var badge = new SolidBrush(Color.FromArgb(0xd2, 0x3c, 0x2a));
+                g.FillRectangle(badge, size - d, size - d, d - 1, d - 1);
             }
         }
         var hIcon = bmp.GetHicon();
