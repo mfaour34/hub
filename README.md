@@ -28,7 +28,7 @@ Hub does the parts you actually use, in **one process with no services, no drive
 
 - **Mouse settings** are written straight to the mouse's onboard memory, so they work even when Hub isn't running.
 - **Headset EQ, sidetone, noise reduction and auto power-off** go straight to the headset, with live battery.
-- **Game / Chat / Media audio channels** each get their own parametric EQ, a look-ahead limiter and a ChatMix slider.
+- **Game / Chat / Media / Music audio channels** each get their own parametric EQ, a look-ahead limiter and a ChatMix slider, remembered per output device.
 
 ## Features
 
@@ -55,12 +55,19 @@ Hub does the parts you actually use, in **one process with no services, no drive
 - Live battery with a low-battery alert (default ≤ 20 %) and a red badge on the tray icon
 
 ### 🔊 Audio channels
-- **Game, Chat and Media** as separate Windows playback devices
+- **Game, Chat, Media and Music**, mixed by Hub itself: no driver, no virtual devices
 - Up to 20 filters per channel (peak, shelf, pass, notch), shown on a live response graph
-- Look-ahead limiter (0 dBFS ceiling), processing at 44.1–192 kHz
+- Look-ahead limiter and **tame loud sounds** per channel, processing at 96 kHz
 - Built-in presets are read-only. **Copy one into a custom profile** and change anything.
-- ChatMix, per-channel volume, and per-app routing ("Discord → Chat")
+- **Per-device profiles:** your headset and your IEMs each keep their own EQ per channel
+- **Equalizer APO presets:** import AutoEq-style `.txt` files, export any profile as one
+- ChatMix, per-channel volume, and per-app routing ("Discord → Chat", "Spotify → Music")
 - Pick any output device and microphone
+
+### 💾 Backup
+- Back up audio and mouse settings to **your own private GitHub repo**, with a token limited to that one repo
+- Restore any backup, with a preview of what changes and an undo
+- Export everything to a folder: JSON, plus Equalizer APO presets for other EQ software
 
 </td>
 </tr>
@@ -70,12 +77,12 @@ Hub does the parts you actually use, in **one process with no services, no drive
 
 | | |
 |---|---|
+| <img src="docs/screenshots/audio.png" alt="Audio channels"> | <img src="docs/screenshots/profiles.png" alt="Profiles per output device"> |
+| **Audio channels**: Game, Chat, Media and Music, each with EQ and tame loud sounds | **Profiles**: each output device keeps its own choices |
+| <img src="docs/screenshots/audio-advanced.png" alt="Advanced EQ editor"> | <img src="docs/screenshots/backup.png" alt="Backup settings"> |
+| **Advanced editor**: an imported Equalizer APO preset | **Backup** to your private GitHub repo, restore, export |
 | <img src="docs/screenshots/mouse-customize.png" alt="Button remapping"> | <img src="docs/screenshots/mouse-advanced.png" alt="Dynamic sensitivity curve"> |
 | **Button remapping**, stored on the mouse | **Dynamic sensitivity** with a draggable curve |
-| <img src="docs/screenshots/headset.png" alt="Headset page"> | <img src="docs/screenshots/audio.png" alt="Audio channels"> |
-| **Headset**: onboard EQ, sidetone, battery | **Audio channels**: EQ, limiter, ChatMix |
-| <img src="docs/screenshots/audio-advanced.png" alt="Advanced EQ editor"> | <img src="docs/screenshots/mouse-performance.png" alt="DPI and polling"> |
-| **Advanced editor**: custom profiles from read-only presets | **DPI stages and polling rate** |
 
 ## Hub vs. the vendor apps
 
@@ -118,7 +125,9 @@ Closing the window frees WebView2 completely. Hub then goes back to one small pr
 | Dynamic sensitivity / custom acceleration curve | Synapse | ✅ |
 | Mouse battery and sleep | Synapse | ✅ |
 | Headset EQ, sidetone, noise reduction, auto power-off, battery | G HUB | ✅ written to the headset |
-| Game / Chat / Media channels, parametric EQ, ChatMix | GG Sonar | ✅ Hub's own audio engine, no driver or extra software |
+| Game / Chat / Media channels, parametric EQ, ChatMix | GG Sonar | ✅ Hub's own audio engine, no driver or extra software, plus a Music channel |
+| A different EQ for each output device (headset, IEMs, speakers) | — | ✅ profiles follow the output you pick |
+| Equalizer APO / AutoEq presets | — | ✅ import and export |
 | Per-app channels | GG Sonar | ✅ |
 | Tame loud sounds (gunshots, explosions) without losing footsteps | — | ✅ per channel |
 | PC specs, live CPU/GPU load and GPU temperature (copyable) | — | ✅ System page, no driver |
@@ -126,7 +135,8 @@ Closing the window frees WebView2 completely. Hub then goes back to one small pr
 | USB devices plugged in now, and a 7-day plug/unplug timeline | — | ✅ System page |
 | Mouse test: real polling rate, steadiness, switch chatter (double-click) detection | — | ✅ Mouse page |
 | Aim lab: flick and tracking trainer, sensitivity finder, converter for 14 FPS games | — | ✅ own window, runs only while open |
-| RGB lighting, macros recorded in-app, cloud profiles | all | ❌ not planned: F13–F24 mapping covers macros through your own tools |
+| Settings backup | cloud profiles (vendor account) | ✅ your own private GitHub repo, or a folder; no account with Hub |
+| RGB lighting, macros recorded in-app | all | ❌ not planned: F13–F24 mapping covers macros through your own tools |
 | Virtual 7.1 surround (HRTF) | GG Sonar, G HUB | ❌ |
 
 ## Supported devices
@@ -161,11 +171,11 @@ Adding a model is one entry in [`DeviceCatalog.cs`](src/Hub.Core/Devices/DeviceC
  │                         ⇄  AudioService             │──► headset (Logitech Centurion over HID)
  └──────────────────────────────┬──────────────────────┘
                                 │ per-app loopback capture
-  apps ─► silent sink ─► Game │ Chat │ Media ─► EQ → limiter (96 kHz) ─► mix ─► your headphones
+  apps ─► silent sink ─► Game │ Chat │ Media │ Music ─► EQ → limiter (96 kHz) ─► mix ─► your headphones
 ```
 
-- **Device settings live on the devices.** Hub only stores what the hardware can't: presets, audio choices and app preferences, in `%APPDATA%\Hub\settings.json`.
-- **Audio runs in Hub, without a driver.** While Hub audio is on, Windows' default playback device is a silent "sink" (Steam Streaming Speakers, renamed *Hub (Hub Audio)*). Hub captures each app with per-process loopback, sorts it into Game, Chat or Media, runs each channel's EQ and limiter at 96 kHz and plays the mix to your output device from one real-time thread. If Hub quits, crashes or you log off, Windows goes back to playing straight to your output device.
+- **Device settings live on the devices.** Hub only stores what the hardware can't: presets, audio choices and app preferences, in `%APPDATA%\Hub\settings.json`. **Back up now** copies them, with the mouse's onboard settings, to your private repo through GitHub's API; the token stays in Windows Credential Manager.
+- **Audio runs in Hub, without a driver.** While Hub audio is on, Windows' default playback device is a silent "sink" (Steam Streaming Speakers, renamed *Hub (Hub Audio)*). Hub captures each app with per-process loopback, sorts it into Game, Chat, Media or Music, runs each channel's EQ and limiter at 96 kHz and plays the mix to your output device from one real-time thread. If Hub quits, crashes or you log off, Windows goes back to playing straight to your output device.
 - **The limiter** (`native/hub-limiter`, built as `hub-dsp.dll`) is a small C library: a stereo-linked look-ahead peak limiter with no runtime dependencies.
 
 ## Building from source
@@ -178,7 +188,7 @@ dotnet publish src/Hub.App -c Release -o publish
 ISCC installer\Hub.iss            # Inno Setup 6 → dist\Hub-Setup-x.y.z.exe
 ```
 
-Handy switches: `Hub.exe --selftest [log]` runs read-only device checks. `--shots <dir> [page…]` renders UI pages to PNG. `HUB_DATA_DIR` moves the settings folder. `HUB_DRY_RUN=1` stops Hub from touching Windows audio. `--audiotest [log]` prints the audio state read-only.
+Handy switches: `Hub.exe --selftest [log]` runs read-only device checks. `--shots <dir> [page…]` renders UI pages to PNG. `HUB_DATA_DIR` moves the settings folder. `HUB_DRY_RUN=1` stops Hub from touching Windows audio. `--audiotest [log]` prints the audio state read-only. `--sessions <file>` lists every app's audio session and device. `--backup-files <dir>` writes the backup files for the current audio settings.
 
 CI builds every push. It also installs, runs and uninstalls the installer on a clean Windows runner, then attaches the installer to tagged releases.
 
