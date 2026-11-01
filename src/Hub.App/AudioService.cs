@@ -2,6 +2,7 @@ using Hub.App.Engine;
 using Hub.App.Native;
 using Hub.Core.Audio;
 using Hub.Core.Audio.Engine;
+using Hub.Core.Backup;
 using Microsoft.Win32;
 
 namespace Hub.App;
@@ -9,7 +10,7 @@ namespace Hub.App;
 /// <summary>
 /// Game/Chat/Media audio channels with no driver or third-party software: while Hub audio is on, Windows' default
 /// playback devices point at a silent "sink" device, every app playing there is captured (per-process loopback),
-/// mixed into Game/Chat/Media with each channel's EQ and limiter, and played to the output device by
+/// mixed into Game/Chat/Media/Music with each channel's EQ and limiter, and played to the output device by
 /// <see cref="AudioEngine"/>. Turning it off (or quitting Hub) points Windows back at the output device.
 /// </summary>
 public sealed class AudioService : IDisposable
@@ -21,6 +22,7 @@ public sealed class AudioService : IDisposable
         new(AudioChannel.Game, "game", "Game"),
         new(AudioChannel.Chat, "chat", "Chat"),
         new(AudioChannel.Media, "media", "Media"),
+        new(AudioChannel.Music, "music", "Music"),
     ];
 
     /// <summary>
@@ -43,6 +45,17 @@ public sealed class AudioService : IDisposable
     {
         _settings = settings;
         _presets = BuiltInPresets.All.ToDictionary(c => c.Channel);
+        MoveMusicPlayers(settings);
+    }
+
+    /// <summary>Once, when Music was added: music players the user had put on Media move to Music.</summary>
+    static void MoveMusicPlayers(AppSettings settings)
+    {
+        if (settings.MusicChannelAdded) return;
+        foreach (var app in settings.AppChannels.Where(kv => kv.Value == "media" && AppChannels.IsMusicPlayer(kv.Key)).Select(kv => kv.Key).ToList())
+            settings.AppChannels[app] = "music";
+        settings.MusicChannelAdded = true;
+        if (!DryRun) settings.Save();
     }
 
     // ---------------- status ----------------
@@ -90,8 +103,11 @@ public sealed class AudioService : IDisposable
     /// <summary>Hub's engine runs every channel's EQ at 96 kHz; profiles from Hub 1.0 may name another rate.</summary>
     public static readonly int[] SampleRates = [AudioEngine.DspRate];
 
-    string ActiveName(AudioChannel ch) =>
-        _settings.AudioPresets.GetValueOrDefault(ch.ToString()) ?? _presets.GetValueOrDefault(ch)?.DefaultName ?? "Flat";
+    string ActiveName(AudioChannel ch) => NameIn(Setup(), ch);
+
+    string NameIn(DeviceAudioSetup setup, AudioChannel ch) =>
+        setup.Presets.GetValueOrDefault(ch.ToString()) is { } n && (CustomPresets(ch).Any(p => p.Name == n) || Presets(ch).Any(p => p.Name == n))
+            ? n : _presets.GetValueOrDefault(ch)?.DefaultName ?? "Flat";
 
     CustomAudioPreset? ActiveCustom(AudioChannel ch) => CustomPresets(ch).FirstOrDefault(p => p.Name == ActiveName(ch));
 
@@ -111,7 +127,7 @@ public sealed class AudioService : IDisposable
     {
         if (!Presets(ch).Any(p => p.Name == name) && !CustomPresets(ch).Any(p => p.Name == name))
             throw new ArgumentException($"No preset “{name}”");
-        _settings.AudioPresets[ch.ToString()] = name;
+        Setup().Presets[ch.ToString()] = name;
         _settings.Save();
         ApplyBuses();
     }
@@ -122,15 +138,10 @@ public sealed class AudioService : IDisposable
     /// </summary>
     public void SaveCustom(AudioChannel ch, string? originalName, CustomAudioPreset preset)
     {
-        preset.Name = preset.Name.Trim();
-        if (preset.Name.Length == 0) throw new ArgumentException("Give the profile a name");
-        if (Presets(ch).Any(p => p.Name.Equals(preset.Name, StringComparison.OrdinalIgnoreCase)))
-            throw new ArgumentException($"“{preset.Name}” is a built-in preset name; pick another");
+        preset.Name = CheckName(ch, preset.Name, originalName);
         var list = CustomPresets(ch);
-        if (list.Any(p => p.Name.Equals(preset.Name, StringComparison.OrdinalIgnoreCase) && p.Name != originalName))
-            throw new ArgumentException($"A custom profile called “{preset.Name}” already exists");
         preset.SampleRate = AudioEngine.DspRate;
-        if (preset.Filters.Count > 20) throw new ArgumentException("At most 20 filters");
+        if (preset.Filters.Count(f => f.Enabled) > 20) throw new ArgumentException("At most 20 filters");
         foreach (var f in preset.Filters)
         {
             if (f.Frequency < 10 || f.Frequency >= 24000) throw new ArgumentException($"Filter frequency {f.Frequency} Hz is out of range");
@@ -140,22 +151,245 @@ public sealed class AudioService : IDisposable
         if (Math.Abs(preset.GainDb) > 24) throw new ArgumentException("Gain is out of range (±24 dB)");
 
         int at = originalName is null ? -1 : list.FindIndex(p => p.Name == originalName);
-        if (at >= 0) list[at] = preset; else list.Add(preset);
+        if (at >= 0)
+        {
+            preset.Source ??= list[at].Source;
+            list[at] = preset;
+            if (originalName != preset.Name) RenameEverywhere(ch, originalName!, preset.Name);
+        }
+        else list.Add(preset);
         _settings.CustomAudioPresets[ch.ToString()] = list;
-        _settings.AudioPresets[ch.ToString()] = preset.Name;
+        Setup().Presets[ch.ToString()] = preset.Name;
         _settings.Save();
         ApplyBuses();
     }
 
-    /// <summary>Removes a custom profile; if it was active the channel goes back to its default preset.</summary>
+    /// <summary>Renames a custom profile; every device using it keeps using it under the new name.</summary>
+    public void RenameCustom(AudioChannel ch, string name, string newName)
+    {
+        var preset = CustomPresets(ch).Find(p => p.Name == name) ?? throw new ArgumentException($"No custom profile “{name}”");
+        newName = CheckName(ch, newName, name);
+        if (newName == name) return;
+        preset.Name = newName;
+        RenameEverywhere(ch, name, newName);
+        _settings.Save();
+    }
+
+    /// <summary>The trimmed name, if no built-in preset or other custom profile of the channel has it.</summary>
+    string CheckName(AudioChannel ch, string name, string? ownName)
+    {
+        name = name.Trim();
+        if (name.Length == 0) throw new ArgumentException("Give the profile a name");
+        if (name.Length > 60) throw new ArgumentException("Keep the name to 60 characters");
+        if (Presets(ch).Any(p => Same(p.Name, name)))
+            throw new ArgumentException($"“{name}” is a built-in preset name; pick another");
+        if (CustomPresets(ch).Any(p => Same(p.Name, name) && p.Name != ownName))
+            throw new ArgumentException($"A custom profile called “{name}” already exists");
+        return name;
+    }
+
+
+    /// <summary>Removes a custom profile; devices using it go back to the channel's default preset.</summary>
     public void DeleteCustom(AudioChannel ch, string name)
     {
         var list = CustomPresets(ch);
         if (list.RemoveAll(p => p.Name == name) == 0) throw new ArgumentException($"No custom profile “{name}”");
+        Setups().RemoveProfile(ch.ToString(), name);
         if (_settings.AudioPresets.GetValueOrDefault(ch.ToString()) == name) _settings.AudioPresets.Remove(ch.ToString());
         _settings.Save();
         ApplyBuses();
     }
+
+    void RenameEverywhere(AudioChannel ch, string oldName, string newName)
+    {
+        Setups().RenameProfile(ch.ToString(), oldName, newName);
+        if (_settings.AudioPresets.GetValueOrDefault(ch.ToString()) == oldName) _settings.AudioPresets[ch.ToString()] = newName;
+    }
+
+    // ---------------- Equalizer APO files ----------------
+
+    public sealed record Imported(string Name, int Filters, double PreampDb, List<EqualizerApoImport.SkippedLine> Skipped);
+
+    /// <summary>
+    /// Adds an Equalizer APO preset as a custom profile and uses it on the current device. It plays exactly as in
+    /// Equalizer APO: the file's own preamp, no limiter and no extra headroom.
+    /// </summary>
+    public Imported ImportEqualizerApo(AudioChannel ch, string fileName, string text)
+    {
+        var r = EqualizerApoImport.Parse(text);
+        if (r.Filters.Count == 0) throw new ArgumentException("No Equalizer APO filters Hub can use were found in that file");
+        var name = EqualizerApoImport.NameFromFile(fileName);
+        if (name.Length > 60) name = name[..60].Trim();
+        var unique = name;
+        for (int n = 2; Presets(ch).Any(p => Same(p.Name, unique)) || CustomPresets(ch).Any(p => Same(p.Name, unique)); n++) unique = $"{name} ({n})";
+        SaveCustom(ch, null, new CustomAudioPreset
+        {
+            Name = unique, GainDb = r.PreampDb, Filters = r.Filters, Limiter = false, AutoHeadroom = false,
+            Source = Path.GetFileName(fileName.Replace('\\', '/')),
+        });
+        return new Imported(unique, r.Filters.Count, r.PreampDb, r.Skipped);
+    }
+
+    static bool Same(string a, string b) => a.Equals(b, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>A profile as an Equalizer APO preset, with the preamp Hub plays it at.</summary>
+    public string ExportEqualizerApo(AudioChannel ch, string name)
+    {
+        if (CustomPresets(ch).FirstOrDefault(p => p.Name == name) is { } c)
+            return new EqPresetData(c.Name, c.GainDb, c.Filters).ToEqualizerApo(autoHeadroom: !c.Limiter && c.AutoHeadroom, sampleRate: AudioEngine.DspRate);
+        var builtIn = Presets(ch).FirstOrDefault(p => p.Name == name) ?? throw new ArgumentException($"No preset “{name}”");
+        var chain = DefaultChain(ch);
+        return builtIn.ToEqualizerApo(autoHeadroom: !chain.Limiter && chain.AutoHeadroom, sampleRate: AudioEngine.DspRate);
+    }
+
+    // ---------------- per-device setups ----------------
+
+    /// <summary>The output device the channel cards show and edit (kept while it's unplugged).</summary>
+    (string Id, string Name)? _device;
+    readonly object _deviceGate = new();
+
+    DeviceSetups Setups() =>
+        new(_settings.DeviceAudio, _settings.DefaultAudioDevice, new DeviceAudioSetup { Presets = _settings.AudioPresets, Tame = _settings.AudioTame });
+
+    /// <summary>The current output device's setup (only before Hub has seen any device: the setup from before).</summary>
+    DeviceAudioSetup Setup()
+    {
+        if (_device is null) TrackDevice(AudioEndpoints.List());
+        lock (_deviceGate)
+            return _device is { } d && _settings.DeviceAudio.TryGetValue(d.Id, out var setup)
+                ? setup : new DeviceAudioSetup { Presets = _settings.AudioPresets, Tame = _settings.AudioTame };
+    }
+
+    /// <summary>
+    /// Settles which device's setup is in use and creates it the first time Hub sees the device (a copy of the default
+    /// device's): the output Hub plays to, else the chosen output while it's unplugged, else the last one.
+    /// </summary>
+    void TrackDevice(List<AudioEndpoint> endpoints)
+    {
+        lock (_deviceGate)
+        {
+            (string Id, string Name)? device = ResolveOutput(endpoints, _settings) is { } output ? (output.Id, output.Name)
+                : _settings.AudioOutput is { } id ? (id, endpoints.FirstOrDefault(e => e.Id == id)?.Name ?? _settings.DeviceAudio.GetValueOrDefault(id)?.Name ?? "")
+                : _device;
+            if (device is not { } d) return;
+
+            var setups = Setups();
+            bool created = !_settings.DeviceAudio.ContainsKey(d.Id);
+            setups.For(d.Id, d.Name);
+            if (created)
+            {
+                _settings.DefaultAudioDevice = setups.DefaultId;
+                if (!DryRun) _settings.Save();
+            }
+            _device = d;
+        }
+    }
+
+    /// <param name="Presets">Channel id → the profile it plays on that device.</param>
+    public sealed record DeviceRow(string Id, string Name, bool Current, bool Connected, bool IsDefault, Dictionary<string, string> Presets, Dictionary<string, double> Tame);
+
+    /// <summary>Every device with a setup, the default first, then the current one.</summary>
+    public List<DeviceRow> Devices()
+    {
+        TrackDevice(AudioEndpoints.List()); // the current device has a row even before anything was changed on it
+        var active = AudioEndpoints.List().Where(e => e.IsRender && e.Active).Select(e => e.Id).ToHashSet();
+        return _settings.DeviceAudio
+            .Select(kv => new DeviceRow(kv.Key, kv.Value.Name, kv.Key == _device?.Id, active.Contains(kv.Key), kv.Key == _settings.DefaultAudioDevice,
+                Channels.ToDictionary(c => c.Id, c => NameIn(kv.Value, c.Channel)),
+                Channels.ToDictionary(c => c.Id, c => kv.Value.Tame.GetValueOrDefault(c.Channel.ToString()))))
+            .OrderByDescending(r => r.IsDefault).ThenByDescending(r => r.Current).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>Every channel of the device on Flat with taming off.</summary>
+    public void StartFlat(string id)
+    {
+        Setups().StartFlat(id, Channels.Select(c => c.Channel.ToString()));
+        _settings.Save();
+        if (id == _device?.Id) ApplyBuses();
+    }
+
+    public void MakeDefault(string id)
+    {
+        var setups = Setups();
+        setups.MakeDefault(id);
+        _settings.DefaultAudioDevice = setups.DefaultId;
+        _settings.Save();
+    }
+
+    // ---------------- backup ----------------
+
+    /// <summary>Everything audio for a backup: profiles, each device's choices (by name), app channels, levels.</summary>
+    public AudioBackup ToBackup()
+    {
+        lock (_deviceGate)
+        {
+            var devices = BackupDevices();
+            return new AudioBackup
+            {
+                Profiles = Channels.ToDictionary(c => c.Channel.ToString(), c => CustomPresets(c.Channel)
+                    .Select(p => new ProfileBackup(p.Name, p.GainDb, [.. p.Filters], p.Limiter, p.AutoHeadroom, p.Source)).ToList()),
+                Devices = devices.Select(kv => new DeviceBackup(kv.Value.Name, new(kv.Value.Presets), new(kv.Value.Tame))).ToList(),
+                DefaultDevice = devices.FirstOrDefault(kv => kv.Key == _settings.DefaultAudioDevice).Value?.Name,
+                AppChannels = new(_settings.AppChannels),
+                Volumes = new(_settings.AudioVolumes),
+                ChatMix = _settings.ChatMix,
+                HeadsetEq = _settings.HeadsetEqPresets.Select(p => new HeadsetEqBackup(p.Name, [.. p.Gains])).ToList(),
+            };
+        }
+    }
+
+    /// <summary>One setup per device name (Windows can list a device twice under old and new ids): the current one wins, then the default.</summary>
+    List<KeyValuePair<string, DeviceAudioSetup>> BackupDevices() =>
+        _settings.DeviceAudio.Where(kv => kv.Value.Name.Trim().Length > 0)
+            .GroupBy(kv => kv.Value.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderByDescending(kv => kv.Key == _device?.Id).ThenByDescending(kv => kv.Key == _settings.DefaultAudioDevice).First())
+            .OrderBy(kv => kv.Value.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    /// <summary>What each device plays on each channel, as Equalizer APO text, for the backup's "in use" folder.</summary>
+    public List<InUseProfile> InUseProfiles()
+    {
+        lock (_deviceGate)
+            return BackupDevices().SelectMany(kv => Channels.Select(c =>
+                new InUseProfile(kv.Value.Name, c.Name, ExportEqualizerApo(c.Channel, NameIn(kv.Value, c.Channel))))).ToList();
+    }
+
+    public static string ApoText(ProfileBackup p) =>
+        new EqPresetData(p.Name, p.GainDb, p.Filters).ToEqualizerApo(autoHeadroom: !p.Limiter && p.AutoHeadroom, sampleRate: AudioEngine.DspRate);
+
+    /// <summary>
+    /// Replaces the audio settings with a backup's (already checked by <see cref="BackupFiles.Parse"/>). Devices the backup
+    /// doesn't name keep their choices; Hub's choice of output, mic and sink stays as it is on this PC.
+    /// </summary>
+    public void RestoreBackup(AudioBackup b)
+    {
+        foreach (var (channel, profiles) in b.Profiles)
+            foreach (var p in profiles)
+                if (Presets(Enum.Parse<AudioChannel>(channel)).Any(x => Same(x.Name, p.Name)))
+                    throw new ArgumentException($"The backup's {channel} profile “{p.Name}” has a built-in preset's name");
+        var endpoints = AudioEndpoints.List().Where(e => e.IsRender).Select(e => (e.Id, e.Name)).ToList();
+        lock (_deviceGate)
+        {
+            _settings.CustomAudioPresets = b.Profiles.ToDictionary(kv => kv.Key, kv => kv.Value.Select(p => new CustomAudioPreset
+            {
+                Name = p.Name, GainDb = p.GainDb, Filters = [.. p.Filters], Limiter = p.Limiter, AutoHeadroom = p.AutoHeadroom,
+                SampleRate = AudioEngine.DspRate, Source = p.Source,
+            }).ToList());
+            var setups = Setups();
+            setups.Restore(b.Devices, b.DefaultDevice, endpoints);
+            _settings.DefaultAudioDevice = setups.DefaultId;
+            _settings.AppChannels = [];
+            foreach (var (app, channel) in b.AppChannels) _settings.AppChannels[app.ToLowerInvariant()] = channel; // looked up in lower case
+            _settings.AudioVolumes = new(b.Volumes);
+            _settings.ChatMix = b.ChatMix;
+            _settings.HeadsetEqPresets = b.HeadsetEq.Select(h => new EqPreset { Name = h.Name, Gains = [.. h.Gains] }).ToList();
+            _settings.Save();
+        }
+        ApplyBuses();
+        ApplyFaders();
+    }
+
 
     // ---------------- engine ----------------
 
@@ -320,12 +554,13 @@ public sealed class AudioService : IDisposable
     public const double MaxTameDb = 12;
 
     /// <summary>How many dB below full scale the channel's limiter holds loud peaks (gunshots, explosions).</summary>
-    public double Tame(AudioChannel ch) => _settings.AudioTame.GetValueOrDefault(ch.ToString(), 0);
+    public double Tame(AudioChannel ch) => Setup().Tame.GetValueOrDefault(ch.ToString(), 0);
 
     public void SetTame(AudioChannel ch, double db)
     {
         db = Math.Clamp(Math.Round(db), 0, MaxTameDb);
-        if (db == 0) _settings.AudioTame.Remove(ch.ToString()); else _settings.AudioTame[ch.ToString()] = db;
+        var tame = Setup().Tame;
+        if (db == 0) tame.Remove(ch.ToString()); else tame[ch.ToString()] = db;
         _settings.Save();
         ApplyBuses();
     }
@@ -375,7 +610,12 @@ public sealed class AudioService : IDisposable
         IsVirtualSink(name) || name.Contains("Sonar", StringComparison.OrdinalIgnoreCase)
         || name.Contains("Voicemeeter", StringComparison.OrdinalIgnoreCase) || name.Contains("VB-Audio", StringComparison.OrdinalIgnoreCase);
 
-    AudioEndpoint? ResolveOutput(List<AudioEndpoint> endpoints) => ResolveOutput(endpoints, _settings);
+    /// <summary>The output device, also settling it as the one whose setup is in use.</summary>
+    AudioEndpoint? ResolveOutput(List<AudioEndpoint> endpoints)
+    {
+        TrackDevice(endpoints);
+        return ResolveOutput(endpoints, _settings);
+    }
 
     /// <summary>
     /// The chosen output. With nothing chosen yet, the device Windows plays to right now (that is where the user's
@@ -418,6 +658,7 @@ public sealed class AudioService : IDisposable
     {
         _settings.AudioOutput = string.IsNullOrWhiteSpace(id) ? null : id;
         _settings.Save();
+        TrackDevice(AudioEndpoints.List());
         Restart();
     }
 
@@ -446,8 +687,9 @@ public sealed class AudioService : IDisposable
 
     // ---------------- per-app channels ----------------
 
-    /// <param name="Channel">"game"/"chat"/"media" while Hub captures it; null when it plays straight to another device.</param>
-    public sealed record AppRoute(string Name, string? Channel, bool Playing);
+    /// <param name="Channel">"game"/"chat"/"media"/"music" while Hub captures it; null when it plays straight to another device.</param>
+    /// <summary>An app with sound; <paramref name="Channel"/> is its remembered channel, used once its audio reaches Hub.</summary>
+    public sealed record AppRoute(string Name, string Channel, bool ThroughHub, bool Playing);
 
     static readonly HashSet<string> IgnoredProcesses = new(StringComparer.OrdinalIgnoreCase) { "Hub", "audiodg" };
 
@@ -459,9 +701,8 @@ public sealed class AudioService : IDisposable
         return AudioSessions.List()
             .Where(s => !IgnoredProcesses.Contains(s.ProcessName))
             .GroupBy(s => s.ProcessName, StringComparer.OrdinalIgnoreCase)
-            .Select(g => new AppRoute(g.Key,
-                g.Any(s => s.EndpointGuid == sinkGuid) ? AppChannels.For(g.Key, _settings.AppChannels).ToString().ToLowerInvariant() : null,
-                g.Any(s => s.Active)))
+            .Select(g => new AppRoute(g.Key, AppChannels.For(g.Key, _settings.AppChannels).ToString().ToLowerInvariant(),
+                g.Any(s => s.EndpointGuid == sinkGuid), g.Any(s => s.Active)))
             .OrderByDescending(a => a.Playing).ThenBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }

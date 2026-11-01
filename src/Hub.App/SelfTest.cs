@@ -141,7 +141,7 @@ static class SelfTest
             foreach (var c in AudioService.Channels)
                 Line($"  {c.Name}: {audio.ActivePreset(c.Channel).Name} limiter={audio.ActiveChain(c.Channel).Limiter} volume={audio.Volume(c.Channel)}");
             foreach (var e in audio.OutputChoices()) Line($"  output choice {e.Name}");
-            foreach (var app in audio.Apps()) Line($"  app {app.Name} channel={app.Channel ?? "-"} playing={app.Playing}");
+            foreach (var app in audio.Apps()) Line($"  app {app.Name} channel={app.Channel} throughHub={app.ThroughHub} playing={app.Playing}");
             Line("RESULT: ok");
             return 0;
         }

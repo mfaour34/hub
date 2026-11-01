@@ -11,7 +11,7 @@ public static partial class ThemeTokens
     public static readonly IReadOnlyList<string> Keys =
     [
         "bg", "side", "panel", "panel2", "line", "text", "muted", "accent", "accentText", "inv", "invText",
-        "good", "warn", "bad", "game", "chat", "media", "labelFont",
+        "good", "warn", "bad", "game", "chat", "media", "music", "labelFont",
     ];
 
     public static readonly IReadOnlyList<string> Presets =

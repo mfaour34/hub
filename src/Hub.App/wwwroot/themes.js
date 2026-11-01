@@ -7,27 +7,27 @@ const THEMES = {
   "instrument-light": {
     bg: "#dedbd3", side: "#d2cec4", panel: "#ebe8e1", panel2: "#e3dfd7", line: "#cfcbc1", text: "#1b1b1b", muted: "#6f6c64",
     accent: "#ff5a1f", accentText: "#1b1b1b", inv: "#1b1b1b", invText: "#ebe8e1",
-    good: "#2f8a57", warn: "#b7791f", bad: "#d23c2a", game: "#ff5a1f", chat: "#1f8a70", media: "#3b6fd1", labelFont: "mono",
+    good: "#2f8a57", warn: "#b7791f", bad: "#d23c2a", game: "#ff5a1f", chat: "#1f8a70", media: "#3b6fd1", music: "#8a4fbf", labelFont: "mono",
   },
   "instrument-dark": {
     bg: "#161513", side: "#1d1c19", panel: "#232220", panel2: "#2a2926", line: "#34322e", text: "#ece9e2", muted: "#8d897f",
     accent: "#ff6a2b", accentText: "#161513", inv: "#ece9e2", invText: "#161513",
-    good: "#4cc38a", warn: "#e3a83b", bad: "#ff5d4d", game: "#ff6a2b", chat: "#3fbf9f", media: "#6f9cff", labelFont: "mono",
+    good: "#4cc38a", warn: "#e3a83b", bad: "#ff5d4d", game: "#ff6a2b", chat: "#3fbf9f", media: "#6f9cff", music: "#b98cff", labelFont: "mono",
   },
   fluent: {
     bg: "#1b1d22", side: "#1b1d22", panel: "#24272d", panel2: "#2c2f36", line: "#34373f", text: "#f3f3f3", muted: "#b9b9b9",
     accent: "#60cdff", accentText: "#0b1a24", inv: "#2f333b", invText: "#ffffff",
-    good: "#6ccb5f", warn: "#fce100", bad: "#ff99a4", game: "#60cdff", chat: "#6ccb5f", media: "#c19bff", labelFont: "sans",
+    good: "#6ccb5f", warn: "#fce100", bad: "#ff99a4", game: "#60cdff", chat: "#6ccb5f", media: "#c19bff", music: "#ffb86b", labelFont: "sans",
   },
   monochrome: {
     bg: "#0a0a0a", side: "#0a0a0a", panel: "#121212", panel2: "#1a1a1a", line: "#2a2a2a", text: "#fafafa", muted: "#8a8a8a",
     accent: "#ffffff", accentText: "#0a0a0a", inv: "#fafafa", invText: "#0a0a0a",
-    good: "#d9d9d9", warn: "#bdbdbd", bad: "#ff4d4d", game: "#ffffff", chat: "#a3a3a3", media: "#6b6b6b", labelFont: "sans",
+    good: "#d9d9d9", warn: "#bdbdbd", bad: "#ff4d4d", game: "#ffffff", chat: "#a3a3a3", media: "#6b6b6b", music: "#c4c4c4", labelFont: "sans",
   },
   studio: {
     bg: "#17150f", side: "#1d1a14", panel: "#201d16", panel2: "#26221a", line: "#332e25", text: "#ece6da", muted: "#9a917f",
     accent: "#f2c46d", accentText: "#17150f", inv: "#ece6da", invText: "#17150f",
-    good: "#9cc47a", warn: "#f2c46d", bad: "#e0735a", game: "#f2c46d", chat: "#9cc47a", media: "#c8a2d8", labelFont: "sans",
+    good: "#9cc47a", warn: "#f2c46d", bad: "#e0735a", game: "#f2c46d", chat: "#9cc47a", media: "#c8a2d8", music: "#7fb3c8", labelFont: "sans",
   },
 };
 
@@ -39,7 +39,7 @@ const THEME_NAMES = {
 const CSS_VARS = {
   bg: "--bg", side: "--side", panel: "--panel", panel2: "--panel-2", line: "--line", text: "--text", muted: "--muted",
   accent: "--accent", accentText: "--accent-text", inv: "--inv", invText: "--inv-text",
-  good: "--good", warn: "--warn", bad: "--bad", game: "--ch-game", chat: "--ch-chat", media: "--ch-media",
+  good: "--good", warn: "--warn", bad: "--bad", game: "--ch-game", chat: "--ch-chat", media: "--ch-media", music: "--ch-music",
 };
 
 const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");

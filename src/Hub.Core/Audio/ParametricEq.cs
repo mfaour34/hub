@@ -41,7 +41,7 @@ public sealed record EqPresetData(string Name, double GainDb, IReadOnlyList<EqFi
         var sb = new StringBuilder();
         sb.AppendLine($"# {Name}");
         double preamp = limiterLibrary is null && autoHeadroom ? GainDb - PeakBoostDb(sampleRate) : GainDb;
-        sb.AppendLine(string.Format(inv, "Preamp: {0:0.0} dB", preamp));
+        sb.AppendLine(string.Format(inv, "Preamp: {0:0.0##} dB", preamp));
         foreach (var f in Filters.Where(f => f.Enabled))
         {
             sb.AppendLine(f.Type switch

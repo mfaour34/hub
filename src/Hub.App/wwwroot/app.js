@@ -56,12 +56,12 @@ const h = (tag, attrs = {}, ...kids) => {
 };
 
 let toastTimer;
-function toast(msg, error = false) {
+function toast(msg, error = false, ms = 2600) {
   const t = $("#toast");
   t.textContent = msg;
   t.className = "toast show" + (error ? " error" : "");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.className = "toast"), 2600);
+  toastTimer = setTimeout(() => (t.className = "toast"), ms);
 }
 
 function paintRange(input) {
@@ -645,10 +645,11 @@ async function loadApps() {
     if (!apps.length) list.replaceChildren(h("p", { class: "hint" }, "Nothing is playing sound right now. Start a game, Discord or music and it shows up here."));
     else list.replaceChildren(...apps.map((a) => {
       const seg = h("div", { class: "segmented" });
-      segmented(seg, [{ value: "game", label: "Game" }, { value: "chat", label: "Chat" }, { value: "media", label: "Media" }], a.channel,
+      segmented(seg, [{ value: "game", label: "Game" }, { value: "chat", label: "Chat" }, { value: "media", label: "Media" }, { value: "music", label: "Music" }], a.channel,
         (channel) => act(a.name, () => call("audio.assignApp", { name: a.name, channel }), `${a.name} → ${channel[0].toUpperCase() + channel.slice(1)}`));
       return h("div", { class: "app-row" },
-        h("span", { class: "name" }, h("i", { class: a.playing ? "on" : "" }), a.name, a.channel ? null : h("small", { class: "muted" }, " (plays to another device)")),
+        h("span", { class: "name" }, h("i", { class: a.playing ? "on" : "" }), a.name,
+          a.throughHub ? null : h("small", { class: "muted", title: `Hub puts it on ${a.channel} once its sound reaches Hub, usually the next time it starts playing` }, " (plays to another device)")),
         seg);
     }));
   } catch (err) { /* transient: sessions come and go */ }
@@ -728,10 +729,97 @@ function renderChannel(c) {
       "Tame loud sounds ", tameVal, tame),
     c.presets.length > 12 ? search : null,
     h("div", { class: "preset-row" }, select,
+      h("button", { class: "btn small", title: "Add an Equalizer APO preset (.txt) as a profile for this channel", onclick: () => importApo(c) }, "Import"),
       h("button", { class: "btn small", title: "EQ filters, gain, limiter and sample rate", onclick: () => openAdvanced(c.id) }, "Advanced")),
     h("canvas", { width: 600, height: 240 }),
     h("p", { class: "hint" }, `${active} filters · gain ${c.preamp.toFixed(1)} dB` + (c.limiter ? " · limiter" : "") + ` · ${c.rate / 1000} kHz`));
 }
+
+// ----- Equalizer APO presets: imported as custom profiles, exported as .txt
+let importInto = null;
+function importApo(c) { importInto = c; $("#apoFile").value = ""; $("#apoFile").click(); }
+$("#apoFile").addEventListener("change", async (e) => {
+  const file = e.target.files[0], c = importInto;
+  if (!file || !c) return;
+  let r;
+  try {
+    r = await call("audio.importApo", { channel: c.id, file: file.name, text: await file.text() });
+  } catch (err) { toast(`Import: ${err.message}`, true, 5000); return; }
+  replaceChannel(r.channel);
+  const what = `${c.name}: imported “${r.name}”, ${r.filters} filters, preamp ${r.preamp} dB`
+    + (r.channel.tame > 0 ? `. Tame loud sounds is still on (−${r.channel.tame} dB) for this device` : "");
+  if (!r.skipped.length) toast(what);
+  else toast(`${what}. Skipped ${r.skipped.length} line${r.skipped.length > 1 ? "s" : ""} Hub can't do: `
+    + r.skipped.slice(0, 3).map((x) => `line ${x.line} (${x.text})`).join(", ") + (r.skipped.length > 3 ? ", …" : ""), false, 9000);
+});
+
+async function exportApo(channel, name) {
+  let text;
+  try { text = await call("audio.exportApo", { channel, name }); } catch (err) { toast(`Export: ${err.message}`, true); return; }
+  const fileName = name.replace(/[\\/:*?"<>|]/g, "_") + ".txt";
+  try {
+    if (window.showSaveFilePicker) {
+      const handle = await showSaveFilePicker({ suggestedName: fileName, types: [{ description: "Equalizer APO preset", accept: { "text/plain": [".txt"] } }] });
+      const w = await handle.createWritable(); await w.write(text); await w.close();
+    } else {
+      h("a", { href: URL.createObjectURL(new Blob([text], { type: "text/plain" })), download: fileName }).click();
+    }
+    toast(`Exported “${name}”`);
+  } catch (err) { if (err.name !== "AbortError") toast(`Export: ${err.message}`, true); }
+}
+
+// ----- profiles: each output device keeps its own profile per channel
+async function openProfiles() {
+  let p;
+  try { p = await call("audio.profiles"); } catch (err) { toast(`Profiles: ${err.message}`, true); return; }
+  renderProfiles(p);
+  if (!$("#profiles").open) $("#profiles").showModal();
+}
+
+function renderProfiles(p) {
+  const profAct = async (what, method, args, ok, current) => {
+    try { renderProfiles(await call(method, args)); toast(ok); } catch (err) { toast(`${what}: ${err.message}`, true); return; }
+    if (current) loadAudio();
+  };
+  $("#profDevices").replaceChildren(...p.devices.map((d) => {
+    const dot = (id) => { const i = h("i"); i.style.background = `var(--ch-${id})`; return i; };
+    return h("div", { class: "prof-dev" + (d.current ? " current" : "") + (d.connected ? "" : " offline") },
+      h("div", { class: "top" }, h("b", {}, d.name || "Unnamed device"),
+        d.isDefault ? h("span", { class: "pill def" }, "default for new devices") : null,
+        d.current ? h("span", { class: "pill now" }, "output") : null,
+        d.connected ? null : h("span", { class: "pill off" }, "not connected"),
+        h("span", { class: "acts" },
+          h("button", { class: "btn small", title: "Every channel on Flat with taming off", onclick: () => {
+            if (confirm(`Put every channel of “${d.name}” on Flat? Its current profiles are replaced.`))
+              profAct("Start flat", "audio.startFlat", { id: d.id }, `${d.name}: flat`, d.current);
+          } }, "Start flat"),
+          d.isDefault ? null : h("button", { class: "btn small", title: "Devices used for the first time copy this one",
+            onclick: () => profAct("Default", "audio.makeDefault", { id: d.id }, `New devices now copy ${d.name}`, false) }, "Make default"))),
+      h("div", { class: "chs" }, ...d.channels.map((c) => h("span", {}, dot(c.id), c.preset,
+        c.tame > 0 ? h("small", {}, `tame −${c.tame} dB`) : null))));
+  }));
+  $("#profMine").replaceChildren(...(p.custom.length ? p.custom.map((x) => h("div", { class: "prof-mine" },
+    h("b", {}, x.name),
+    h("small", {}, [x.channelName.toLowerCase(), `${x.filters} filters`, x.source ? `imported from ${x.source}` : null].filter(Boolean).join(" · ")),
+    h("span", { class: "acts" },
+      h("button", { class: "btn small", onclick: async () => {
+        const name = prompt(`New name for “${x.name}”`, x.name);
+        if (name == null || name.trim() === x.name) return;
+        try { replaceChannel(await call("audio.renameCustom", { channel: x.channel, name: x.name, newName: name })); } catch (err) { toast(`Rename: ${err.message}`, true); return; }
+        toast(`Renamed to “${name.trim()}”`);
+        openProfiles();
+      } }, "Rename"),
+      h("button", { class: "btn small", onclick: () => exportApo(x.channel, x.name) }, "Export"),
+      h("button", { class: "btn small ghost", onclick: async () => {
+        if (!confirm(`Delete the custom profile “${x.name}”? Devices using it go back to the channel's default.`)) return;
+        try { replaceChannel(await call("audio.deleteCustom", { channel: x.channel, name: x.name })); } catch (err) { toast(`Delete: ${err.message}`, true); return; }
+        toast(`Deleted “${x.name}”`);
+        openProfiles();
+      } }, "Delete"))))
+    : [h("p", { class: "muted" }, "None yet. Copy a preset in Advanced, or use Import next to a channel's preset list.")]));
+}
+$("#openProfiles").addEventListener("click", openProfiles);
+$$("#profiles [data-close]").forEach((b) => b.addEventListener("click", () => $("#profiles").close()));
 
 /** Swaps one channel card for fresh data from the host (after a preset change or a save). */
 function replaceChannel(r) {
@@ -921,6 +1009,7 @@ $("#chatMix").addEventListener("dblclick", () => { setRange($("#chatMix"), 0); u
 let appearance = null; // { theme, customTheme, followWindows, devicePictures }
 
 async function loadSettings() {
+  loadBackup();
   const s = await call("settings.load");
   appearance = { theme: s.theme, customTheme: s.customTheme, followWindows: s.followWindows, devicePictures: s.devicePictures };
   renderAppearance();
@@ -1139,3 +1228,167 @@ call("settings.load").then((s) => {
 $$("input[type=range]").forEach(paintRange);
 setLive(isVisible("overview"));
 call("state").then(onState).catch(() => {});
+
+// ---------------------------------------------------------------- backup
+// The token goes to the host once, when linking, and is cleared from the page right after; the page never gets it back.
+const TOKEN_URL = "https://github.com/settings/personal-access-tokens/new?name=Hub%20settings%20backup"
+  + "&description=Lets%20Hub%20back%20up%20its%20settings%20to%20one%20private%20repo&expires_in=90&contents=write";
+
+async function loadBackup() {
+  try { renderBackup(await call("backup.status")); } catch (err) { toast(`Backup: ${err.message}`, true); }
+}
+
+/** "today 21:42", "yesterday 21:30", "28 Oct 18:05" */
+function when(iso) {
+  const d = new Date(iso), now = new Date();
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((day(now) - day(d)) / 864e5);
+  return days === 0 ? `today ${time}` : days === 1 ? `yesterday ${time}`
+    : `${d.toLocaleDateString([], { day: "numeric", month: "short", ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}) })} ${time}`;
+}
+
+function renderBackup(s) {
+  $("#bkRepo").replaceChildren(...(s.linked ? [s.repo, " · ", h("a", { onclick: unlinkBackup }, "unlink")] : []));
+  const exportBtn = h("button", { class: "btn", onclick: exportBackup }, "Export to folder…");
+  if (!s.linked) {
+    const repo = h("input", { type: "text", placeholder: "your-name/hub-settings", spellcheck: "false", autocomplete: "off" });
+    const token = h("input", { type: "password", placeholder: "github_pat_…", spellcheck: "false", autocomplete: "off" });
+    const link = h("button", { class: "btn primary" }, "Link repo");
+    link.addEventListener("click", async () => {
+      link.disabled = true; link.textContent = "Checking…";
+      const args = { repo: repo.value, token: token.value };
+      token.value = "";
+      try {
+        renderBackup(await call("backup.link", args));
+        toast("Linked. Press Back up now for the first backup.");
+      } catch (err) {
+        toast(`Link: ${err.message}`, true, 8000);
+        link.disabled = false; link.textContent = "Link repo";
+      }
+    });
+    $("#bkBody").replaceChildren(
+      h("p", { class: "muted" }, "Keep your audio and mouse settings in a private GitHub repo, or export them to a folder."),
+      h("div", { class: "bk-link" },
+        h("label", { class: "field" }, "Private repo", repo),
+        h("label", { class: "field" }, "Access token", token)),
+      h("p", { class: "bk-fine" }, "Use a fine-grained token with access to only this repo and “Contents: Read and write”. ",
+        h("a", { href: TOKEN_URL, target: "_blank" }, "Make one on GitHub"),
+        ". Hub keeps it in Windows Credential Manager and checks it can't reach other private repos or do more than that."),
+      h("div", { class: "bk-actions" }, link, exportBtn));
+    return;
+  }
+  const stale = !!s.changedSince || !s.lastBackup;
+  const expires = s.tokenExpires ? new Date(s.tokenExpires) : null;
+  const expiringSoon = expires && expires - Date.now() < 14 * 864e5;
+  const remind = h("input", { type: "checkbox", ...(s.remind ? { checked: "" } : {}) });
+  remind.addEventListener("change", () => act("Reminder", async () => renderBackup(await call("backup.setRemind", { on: remind.checked })),
+    remind.checked ? "Reminders on" : "Reminders off"));
+  const now = h("button", { class: "btn primary" }, "Back up now");
+  now.addEventListener("click", async () => {
+    now.disabled = true; now.textContent = "Backing up…";
+    try {
+      const r = await call("backup.now");
+      renderBackup(r.status);
+      toast((r.committed ? "Backed up to GitHub" : "Backed up: nothing changed since the last backup") + (r.note ? `. ${r.note}` : ""), false, r.note ? 7000 : 2600);
+    } catch (err) {
+      toast(`Backup: ${err.message}`, true, 8000);
+      now.disabled = false; now.textContent = "Back up now";
+    }
+  });
+  $("#bkBody").replaceChildren(...[
+    h("div", { class: "bk-state" + (stale ? " stale" : "") }, h("i"),
+      !s.lastBackup ? "Not backed up yet"
+        : s.changedSince ? `Changed since the last backup (${when(s.lastBackup)})` : `Backed up ${when(s.lastBackup)}`),
+    expiringSoon ? h("p", { class: "setup-error" }, expires < Date.now()
+      ? "The token has expired. Make a new one, unlink, and link the repo again."
+      : `The token expires ${when(s.tokenExpires)}. Make a new one, unlink, and link again before then.`) : null,
+    h("div", { class: "row between" }, h("span", {}, "Remind me when settings changed and aren't backed up"),
+      h("label", { class: "switch" }, remind, h("span"))),
+    h("div", { class: "bk-actions" }, now,
+      h("button", { class: "btn", onclick: openRestore }, "Restore…"),
+      exportBtn),
+  ].filter(Boolean));
+}
+
+async function unlinkBackup() {
+  if (!confirm("Unlink the repo? Hub deletes the token from Windows Credential Manager. Your backups stay in the repo.\n\nAlso revoke the token on GitHub (Settings → Developer settings → Personal access tokens) if you won't use it again.")) return;
+  try { renderBackup(await call("backup.unlink")); toast("Unlinked"); } catch (err) { toast(`Unlink: ${err.message}`, true); }
+}
+
+let restoreId = null;
+async function openRestore() {
+  let list;
+  try { list = await call("backup.list"); } catch (err) { toast(`Restore: ${err.message}`, true, 8000); return; }
+  restoreId = null;
+  $("#rsGo").disabled = true;
+  $("#rsDiff").replaceChildren(h("span", { class: "muted" }, list.length ? "Pick a backup to see what it changes." : "No backups yet. Press Back up now first."));
+  $("#rsList").replaceChildren(...list.map((b) => {
+    const row = h("button", { type: "button", class: "rs-row" }, h("b", {}, b.id === "before-restore" ? "Undo the last restore" : when(b.date)),
+      h("small", {}, b.id === "before-restore" ? `${when(b.date)} · ${b.label}` : b.label));
+    row.addEventListener("click", () => previewRestore(b, row));
+    return row;
+  }));
+  $("#restore").showModal();
+  const first = $(".rs-row", $("#rsList"));
+  if (first && list[0].id !== "before-restore") first.click();
+}
+
+async function previewRestore(b, row) {
+  $$(".rs-row", $("#rsList")).forEach((r) => r.classList.toggle("sel", r === row));
+  restoreId = b.id;
+  $("#rsGo").disabled = true;
+  $("#rsGo").textContent = b.id === "before-restore" ? "Undo the restore" : "Restore this backup";
+  $("#rsDiff").replaceChildren(h("span", { class: "muted" }, "Reading the backup…"));
+  try {
+    const lines = await call("backup.preview", { id: b.id });
+    if (restoreId !== b.id) return;
+    $("#rsDiff").replaceChildren(h("div", { class: "settings-sub" }, "what changes"),
+      ...(lines.length ? lines.map((l) => h("div", {}, l)) : [h("div", { class: "muted" }, "Nothing: this backup matches your current settings.")]));
+    $("#rsGo").disabled = false;
+  } catch (err) {
+    if (restoreId === b.id) $("#rsDiff").replaceChildren(h("span", { class: "setup-error" }, err.message));
+  }
+}
+
+$("#rsGo").addEventListener("click", async () => {
+  const id = restoreId;
+  if (!id) return;
+  $("#rsGo").disabled = true;
+  try {
+    const notes = await call("backup.restore", { id });
+    $("#restore").close();
+    toast((id === "before-restore" ? "Restore undone" : "Restored") + (notes.length ? `. ${notes.join(" ")}` : ""), false, notes.length ? 9000 : 2600);
+  } catch (err) {
+    toast(`Restore: ${err.message}`, true, 8000);
+    $("#rsGo").disabled = false;
+    return;
+  }
+  loadBackup();
+  loadAudio().catch(() => {});
+});
+$$("#restore [data-close]").forEach((b) => b.addEventListener("click", () => $("#restore").close()));
+
+/** Writes every backup file into a new dated folder inside the folder the user picks. */
+async function exportBackup() {
+  if (!window.showDirectoryPicker) { toast("Export needs a newer Microsoft Edge WebView2 runtime", true); return; }
+  let dir;
+  try { dir = await showDirectoryPicker({ id: "hub-export", mode: "readwrite" }); }
+  catch (err) { if (err.name !== "AbortError") toast(`Export: ${err.message}`, true); return; }
+  try {
+    const r = await call("backup.export");
+    const d = new Date(), pad = (n) => String(n).padStart(2, "0");
+    const folder = `Hub backup ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}-${pad(d.getMinutes())}`;
+    const root = await dir.getDirectoryHandle(folder, { create: true });
+    const paths = Object.keys(r.files);
+    for (const path of paths) {
+      const parts = path.split("/");
+      let here = root;
+      for (const part of parts.slice(0, -1)) here = await here.getDirectoryHandle(part, { create: true });
+      const w = await (await here.getFileHandle(parts.at(-1), { create: true })).createWritable();
+      await w.write(r.files[path]);
+      await w.close();
+    }
+    toast(`Exported ${paths.length} files to “${folder}”` + (r.mouseProblem ? `. ${r.mouseProblem}` : ""), false, r.mouseProblem ? 8000 : 3500);
+  } catch (err) { toast(`Export: ${err.message}`, true, 6000); }
+}

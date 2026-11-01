@@ -9,7 +9,7 @@ namespace Hub.App.Engine;
 
 /// <summary>
 /// Hub's own audio engine, with no virtual-device driver: apps play to a silent "sink"
-/// device, each app's audio is captured with per-process loopback, mixed into Game/Chat/Media with their EQ and
+/// device, each app's audio is captured with per-process loopback, mixed into Game/Chat/Media/Music with their EQ and
 /// limiter (<see cref="MixGraph"/>) and played to the output device by one real-time thread.
 /// </summary>
 public sealed class AudioEngine : IDisposable

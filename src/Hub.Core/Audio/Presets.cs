@@ -1,6 +1,7 @@
 namespace Hub.Core.Audio;
 
-public enum AudioChannel { Game, Chat, Media }
+/// <summary>Hub's channels: Media is for video and browsers, Music for music players.</summary>
+public enum AudioChannel { Game, Chat, Media, Music }
 
 /// <summary>The read-only presets of one channel and the one selected until the user picks another.</summary>
 public sealed record ChannelPresets(AudioChannel Channel, IReadOnlyList<EqPresetData> Presets, string DefaultName);
@@ -40,6 +41,14 @@ public static class BuiltInPresets
             new("Bass boost", 0, [Ls(90, 6), Pk(250, -1.5, 1)]),
             new("Movies", 0, [Ls(70, 4), Pk(2500, 2, 1.2), Hs(10000, 1.5)]),
             new("Podcasts", 0, [Hp(80), Pk(250, -1.5, 1), Pk(3000, 3, 1)]),
+        ], "Music"),
+        new(AudioChannel.Music,
+        [
+            EqPresetData.Flat(),
+            new("Music", 0, [Ls(100, 2.5), Pk(1000, -0.5, 0.7), Hs(9000, 2)]),
+            new("Bass boost", 0, [Ls(90, 6), Pk(250, -1.5, 1)]),
+            // Takes the edge off bright recordings and in-ears for long listening.
+            new("Warm", 0, [Ls(120, 2), Pk(3500, -1.5, 1), Hs(8000, -2)]),
         ], "Music"),
     ];
 }

@@ -24,6 +24,22 @@ public sealed class CustomAudioPreset
     public bool AutoHeadroom { get; set; } = true;
     /// <summary>Rate the channel's Windows device (and so the EQ and limiter) runs at.</summary>
     public int SampleRate { get; set; } = 96000;
+    /// <summary>The Equalizer APO file it was imported from; null for profiles made in Hub.</summary>
+    public string? Source { get; set; }
+}
+
+/// <summary>The GitHub backup's state. The token itself is in Windows Credential Manager, never in this file.</summary>
+public sealed class BackupSettings
+{
+    /// <summary>"owner/name" of the linked private repo; null = not linked.</summary>
+    public string? Repo { get; set; }
+    public string Branch { get; set; } = "main";
+    public DateTimeOffset? TokenExpires { get; set; }
+    public DateTimeOffset? LastBackup { get; set; }
+    /// <summary>First change to audio or mouse settings since the last backup; null = nothing unsaved.</summary>
+    public DateTimeOffset? ChangedSince { get; set; }
+    public bool Remind { get; set; } = true;
+    public DateTimeOffset? LastReminder { get; set; }
 }
 
 /// <summary>
@@ -68,13 +84,20 @@ public sealed class AppSettings
     public List<CurvePointDto> CustomCurve { get; set; } =
         [new(0, 1), new(10, 1.15), new(25, 1.3), new(50, 1.4), new(100, 1.4)];
 
-    /// <summary>Selected preset per channel (missing → the channel's default).</summary>
+    /// <summary>
+    /// The one setup Hub had before output devices got their own: selected preset per channel (missing → the
+    /// channel's default). A device's first setup copies it until there's a default device (<see cref="DeviceAudio"/>).
+    /// </summary>
     public Dictionary<string, string> AudioPresets { get; set; } = [];
     /// <summary>Channel name → the user's custom profiles (built-in presets are read-only).</summary>
     public Dictionary<string, List<CustomAudioPreset>> CustomAudioPresets { get; set; } = [];
     public Dictionary<string, double> AudioVolumes { get; set; } = [];
-    /// <summary>Per channel, how far below full scale the limiter holds loud peaks, in dB (0 = only above full scale).</summary>
+    /// <summary>Like <see cref="AudioPresets"/>, from before devices had their own: per channel, how far below full scale the limiter holds loud peaks, in dB.</summary>
     public Dictionary<string, double> AudioTame { get; set; } = [];
+    /// <summary>Output endpoint id → that device's profiles and tame levels.</summary>
+    public Dictionary<string, DeviceAudioSetup> DeviceAudio { get; set; } = [];
+    /// <summary>The device whose setup a device used for the first time copies.</summary>
+    public string? DefaultAudioDevice { get; set; }
     public double ChatMix { get; set; }
     /// <summary>Hub's audio engine is on: apps play to the sink device and Hub plays the mix to <see cref="AudioOutput"/>.</summary>
     public bool AudioRouted { get; set; }
@@ -84,6 +107,8 @@ public sealed class AppSettings
     public string? SinkEndpoint { get; set; }
     /// <summary>The sink's own name while Hub has renamed it: [endpoint id, description, interface name].</summary>
     public string[]? SinkOriginalName { get; set; }
+    /// <summary>Music players on Media have been moved to the Music channel (done once, when it was added).</summary>
+    public bool MusicChannelAdded { get; set; }
     /// <summary>Process name (lower case) → channel id, the user's per-app choices.</summary>
     public Dictionary<string, string> AppChannels { get; set; } = [];
     /// <summary>Capture endpoint id made the default mic; null = leave Windows' default microphone alone.</summary>
@@ -92,6 +117,8 @@ public sealed class AppSettings
     public Dictionary<string, string> ChannelEndpoints { get; set; } = [];
     /// <summary>Hub 1.0 (VoiceMeeter routing): endpoint ids hidden by "Hide unused devices", shown again by the migration.</summary>
     public List<string> HiddenEndpoints { get; set; } = [];
+
+    public BackupSettings Backup { get; set; } = new();
 
     /// <summary>%APPDATA%\Hub, or HUB_DATA_DIR (portable installs, development, screenshots).</summary>
     public static string DataDir => Environment.GetEnvironmentVariable("HUB_DATA_DIR") is { Length: > 0 } dir
@@ -116,9 +143,17 @@ public sealed class AppSettings
         return new();
     }
 
+    static readonly object SaveGate = new();
+
+    /// <summary>Saves from any thread; writes a temporary file first so a crash mid-save can't leave half a file.</summary>
     public void Save()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-        File.WriteAllText(FilePath, JsonSerializer.Serialize(this, Json));
+        lock (SaveGate)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+            var temp = FilePath + ".tmp";
+            File.WriteAllText(temp, JsonSerializer.Serialize(this, Json));
+            File.Move(temp, FilePath, overwrite: true);
+        }
     }
 }

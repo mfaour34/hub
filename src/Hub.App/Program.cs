@@ -27,6 +27,28 @@ static class Program
             return SelfTest.RunMouse(int.Parse(mouseSecs), args.Length > 2 ? args[2] : Path.Combine(Path.GetTempPath(), "hub-mousetest.log"));
         if (args is ["--systemtest", ..])
             return SelfTest.RunSystem(args.Length > 1 ? args[1] : Path.Combine(Path.GetTempPath(), "hub-systemtest.log"));
+        if (args is ["--sessions", var sessionsLog, ..])
+        {
+            // Read-only: every app audio session, which device it plays to, and any per-app device Windows has stored.
+            var names = Native.AudioEndpoints.List().ToDictionary(e => e.Guid, e => e.Name, StringComparer.OrdinalIgnoreCase);
+            File.WriteAllLines(sessionsLog, Native.AudioSessions.List().Select(s =>
+                $"{s.ProcessName} pid={s.ProcessId} active={s.Active} device={names.GetValueOrDefault(s.EndpointGuid, s.EndpointGuid)} appOutput={Native.AudioSessions.GetAppOutput(s.ProcessId) ?? "-"}"));
+            return 0;
+        }
+        if (args is ["--backup-files", var backupDir, ..])
+        {
+            // Read-only: the backup files of the current audio settings (no mouse, no GitHub), checked like a restore would.
+            var audio = new AudioService(AppSettings.Load());
+            var files = Hub.Core.Backup.BackupFiles.Build(audio.ToBackup(), null, audio.InUseProfiles(), AudioService.ApoText);
+            Hub.Core.Backup.BackupFiles.Parse(files[Hub.Core.Backup.BackupFiles.AudioFile], null);
+            foreach (var (path, text) in files)
+            {
+                var file = Path.Combine(backupDir, path);
+                Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                File.WriteAllText(file, text);
+            }
+            return 0;
+        }
         if (args is ["--selftest", ..])
             return SelfTest.Run(args.Length > 1 ? args[1] : Path.Combine(Path.GetTempPath(), "hub-selftest.log"));
 

@@ -12,7 +12,8 @@ using Microsoft.Win32;
 namespace Hub.App;
 
 /// <summary>Request/response bridge between the WebView2 UI (wwwroot/app.js) and the device/audio services.</summary>
-public sealed class Bridge(DeviceManager devices, AudioService audio, AppSettings settings, SystemInfo.StabilityWatcher stability, SystemInfo.DeviceWatcher usb)
+public sealed class Bridge(DeviceManager devices, AudioService audio, AppSettings settings, SystemInfo.StabilityWatcher stability, SystemInfo.DeviceWatcher usb,
+    BackupService backup)
 {
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -69,6 +70,7 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
         try
         {
             var data = await Dispatch(cmd, args);
+            if (ChangesBackup.Contains(cmd)) backup.MarkChanged();
             return JsonSerializer.Serialize(new { id, ok = true, data }, Json);
         }
         catch (Exception ex)
@@ -76,6 +78,15 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
             return JsonSerializer.Serialize(new { id, ok = false, error = ex.Message }, Json);
         }
     }
+
+    /// <summary>Commands that change what a backup holds.</summary>
+    static readonly HashSet<string> ChangesBackup =
+    [
+        "mouse.setStages", "mouse.setPolling", "mouse.setPower", "mouse.setLift", "mouse.setDyn", "mouse.setRotation", "mouse.setButton",
+        "headset.savePreset",
+        "audio.setPreset", "audio.saveCustom", "audio.renameCustom", "audio.deleteCustom", "audio.setVolume", "audio.setTame",
+        "audio.setChatMix", "audio.assignApp", "audio.importApo", "audio.startFlat", "audio.makeDefault", "audio.setOutput",
+    ];
 
     async Task<object?> Dispatch(string cmd, JsonObject a)
     {
@@ -184,7 +195,9 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
             case "headset.savePreset":
             {
                 var name = a["name"]!.GetValue<string>().Trim();
+                if (name.Length is 0 or > 60 || name.Any(char.IsControl)) throw new ArgumentException("Give the preset a name of up to 60 characters");
                 var gains = a["gains"]!.AsArray().Select(g => g!.GetValue<int>()).ToArray();
+                if (gains.Length != 5 || gains.Any(g => g is < -12 or > 12)) throw new ArgumentException("5 bands of -12..12 dB");
                 var existing = settings.HeadsetEqPresets.FirstOrDefault(p => p.Name == name);
                 if (existing is null) settings.HeadsetEqPresets.Add(existing = new EqPreset { Name = name });
                 existing.Gains = gains;
@@ -217,6 +230,15 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
                 var original = a["original"]?.GetValue<string>();
                 return await Sta.Run(() => { audio.SaveCustom(ch.Channel, original, preset); return ChannelJson(ch); });
             }
+            case "audio.renameCustom":
+            {
+                var ch = Channel(a);
+                return await Sta.Run(() =>
+                {
+                    audio.RenameCustom(ch.Channel, a["name"]!.GetValue<string>(), a["newName"]!.GetValue<string>());
+                    return ChannelJson(ch);
+                });
+            }
             case "audio.deleteCustom":
             {
                 var ch = Channel(a);
@@ -229,7 +251,7 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
             case "audio.start": await Sta.Run(audio.Start); return null;
             case "audio.stop": await Sta.Run(audio.Stop); return null;
             case "audio.apps":
-                return await Sta.Run(() => audio.Apps().Select(x => new { name = x.Name, channel = x.Channel, playing = x.Playing }));
+                return await Sta.Run(() => audio.Apps().Select(x => new { name = x.Name, channel = x.Channel, throughHub = x.ThroughHub, playing = x.Playing }));
             case "audio.assignApp":
                 await Sta.Run(() => audio.AssignApp(a["name"]!.GetValue<string>(), a["channel"]!.GetValue<string>()));
                 return null;
@@ -244,6 +266,30 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
                     micChosen = settings.MicEndpoint is not null,
                 });
             case "audio.setOutput": await Sta.Run(() => audio.SetOutput(a["id"]?.GetValue<string>())); return null;
+            case "audio.importApo":
+            {
+                var ch = Channel(a);
+                return await Sta.Run(() =>
+                {
+                    var r = audio.ImportEqualizerApo(ch.Channel, a["file"]!.GetValue<string>(), a["text"]!.GetValue<string>());
+                    return new
+                    {
+                        name = r.Name, filters = r.Filters, preamp = r.PreampDb,
+                        skipped = r.Skipped.Select(x => new { line = x.Line, text = x.Text }),
+                        channel = ChannelJson(ch),
+                    };
+                });
+            }
+            case "audio.exportApo":
+            {
+                var ch = Channel(a);
+                return await Sta.Run(() => audio.ExportEqualizerApo(ch.Channel, a["name"]!.GetValue<string>()));
+            }
+            case "audio.profiles": return await Sta.Run(ProfilesJson);
+            case "audio.startFlat":
+                return await Sta.Run(() => { audio.StartFlat(a["id"]!.GetValue<string>()); return ProfilesJson(); });
+            case "audio.makeDefault":
+                return await Sta.Run(() => { audio.MakeDefault(a["id"]!.GetValue<string>()); return ProfilesJson(); });
             case "audio.setMic": await Sta.Run(() => audio.SetMic(a["id"]?.GetValue<string>())); return null;
 
             // ---------------- system ----------------
@@ -277,6 +323,28 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
             case "system.openEvent":
                 OpenEventViewer(a["log"]!.GetValue<string>(), a["recordId"]!.GetValue<long>());
                 return null;
+
+            // ---------------- backup ----------------
+            case "backup.status": return backup.Status();
+            case "backup.link":
+                await backup.Link(a["repo"]!.GetValue<string>(), a["token"]!.GetValue<string>());
+                return backup.Status();
+            case "backup.unlink": backup.Unlink(); return backup.Status();
+            case "backup.setRemind": backup.SetRemind(a["on"]!.GetValue<bool>()); return backup.Status();
+            case "backup.now":
+            {
+                var r = await backup.BackupNow();
+                return new { committed = r.Committed, mouse = r.MouseIncluded, note = r.Note, status = backup.Status() };
+            }
+            case "backup.list":
+                return (await backup.List()).Select(b => new { id = b.Id, date = b.Date, label = b.Label });
+            case "backup.preview": return await backup.Preview(a["id"]!.GetValue<string>());
+            case "backup.restore": return await backup.Restore(a["id"]!.GetValue<string>());
+            case "backup.export":
+            {
+                var (files, mouseProblem) = await backup.CollectFiles();
+                return new { files, mouseProblem };
+            }
 
             // ---------------- settings ----------------
             case "settings.load":
@@ -521,6 +589,19 @@ public sealed class Bridge(DeviceManager devices, AudioService audio, AppSetting
             channels = AudioService.Channels.Select(ChannelJson),
         };
     }
+
+    object ProfilesJson() => new
+    {
+        devices = audio.Devices().Select(d => new
+        {
+            id = d.Id, name = d.Name, current = d.Current, connected = d.Connected, isDefault = d.IsDefault,
+            channels = AudioService.Channels.Select(c => new { id = c.Id, name = c.Name, preset = d.Presets[c.Id], tame = d.Tame[c.Id] }),
+        }),
+        custom = AudioService.Channels.SelectMany(c => audio.CustomPresets(c.Channel).Select(p => new
+        {
+            channel = c.Id, channelName = c.Name, name = p.Name, source = p.Source, filters = p.Filters.Count(f => f.Enabled),
+        })),
+    };
 
     object ChannelJson(AudioService.ChannelDef c)
     {

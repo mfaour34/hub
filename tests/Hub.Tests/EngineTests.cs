@@ -141,6 +141,27 @@ public class EngineTests
     }
 
     [Fact]
+    public void Music_is_its_own_channel_next_to_media()
+    {
+        var g = new MixGraph(Io);
+        g.SetBus(AudioChannel.Media, new BusSettings(new EqChain(EqPresetData.Flat(), Rate, 0), null));
+        g.SetBus(AudioChannel.Music, new BusSettings(new EqChain(EqPresetData.Flat(), Rate, 0), new Gain(0.5f)));
+        var video = new AppStream(Io); var music = new AppStream(Io);
+        g.AddSource(1, video, AudioChannel.Media);
+        g.AddSource(2, music, AudioChannel.Music);
+        var dc = Enumerable.Repeat(0.2f, 2 * 480).ToArray();
+        var output = new float[2 * 480];
+        void Render() { video.Write(dc); music.Write(dc); g.Render(output, 480); }
+        for (int i = 0; i < 4; i++) Render();
+        // media 0.2 + music 0.2 × its own chain's 0.5
+        Assert.Equal(0.3f, output[^2], 3);
+
+        g.SetBusGain(AudioChannel.Music, 0);
+        Render(); Render();
+        Assert.Equal(0.2f, output[^1], 3); // Music's fader leaves Media alone
+    }
+
+    [Fact]
     public void Mix_graph_retires_replaced_limiters_off_the_audio_thread()
     {
         var g = new MixGraph(Io);
@@ -198,13 +219,19 @@ public class EngineTests
 
     [Theory]
     [InlineData("Discord", AudioChannel.Chat)]
-    [InlineData("Spotify", AudioChannel.Media)]
+    [InlineData("Spotify", AudioChannel.Music)]
+    [InlineData("foobar2000", AudioChannel.Music)]
+    [InlineData("vlc", AudioChannel.Media)]
     [InlineData("cs2", AudioChannel.Game)]
     [InlineData("brave", AudioChannel.Game)]
     public void Apps_default_to_their_usual_channel(string app, AudioChannel expected) =>
         Assert.Equal(expected, AppChannels.For(app, new Dictionary<string, string>()));
 
     [Fact]
-    public void User_choice_overrides_the_default_channel() =>
+    public void User_choice_overrides_the_default_channel()
+    {
         Assert.Equal(AudioChannel.Media, AppChannels.For("Brave", new Dictionary<string, string> { ["brave"] = "media" }));
+        Assert.Equal(AudioChannel.Music, AppChannels.For("Brave", new Dictionary<string, string> { ["brave"] = "music" }));
+        Assert.Equal(AudioChannel.Media, AppChannels.For("Spotify", new Dictionary<string, string> { ["spotify"] = "media" }));
+    }
 }

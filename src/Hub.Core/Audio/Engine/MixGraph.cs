@@ -12,7 +12,7 @@ public interface IBlockLimiter : IDisposable
 public sealed record BusSettings(EqChain Eq, IBlockLimiter? Limiter);
 
 /// <summary>
-/// Hub's mixer: app streams are summed into Game/Chat/Media,
+/// Hub's mixer: app streams are summed into Game/Chat/Media/Music,
 /// each channel goes through its EQ and limiter and its volume × ChatMix gain, and the channels are summed to the
 /// output. Everything here runs on the real-time audio thread; other threads change it only by posting commands,
 /// so the audio path never takes a lock or waits.
@@ -40,7 +40,7 @@ public sealed class MixGraph : IDisposable
     readonly ConcurrentQueue<Action> _commands = new();
     readonly ConcurrentQueue<IDisposable> _retired = new();
     readonly Dictionary<int, Source> _sources = [];
-    readonly Bus[] _buses = [new(), new(), new()];
+    readonly Bus[] _buses = Enum.GetValues<AudioChannel>().Select(_ => new Bus()).ToArray();
     readonly float[] _tmpL = new float[MaxFrames], _tmpR = new float[MaxFrames];
     float _master = 1, _targetMaster = 1;
 

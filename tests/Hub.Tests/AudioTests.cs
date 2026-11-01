@@ -10,7 +10,7 @@ public class AudioTests
     [Fact]
     public void Every_channel_has_flat_and_a_valid_default()
     {
-        Assert.Equal([AudioChannel.Game, AudioChannel.Chat, AudioChannel.Media], BuiltInPresets.All.Select(c => c.Channel));
+        Assert.Equal(Enum.GetValues<AudioChannel>(), BuiltInPresets.All.Select(c => c.Channel));
         foreach (var c in BuiltInPresets.All)
         {
             Assert.Contains(c.Presets, p => p.Name == "Flat" && p.Filters.Count == 0);

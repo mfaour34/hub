@@ -44,12 +44,35 @@ public sealed class MainWindow : Form
         // the page starts in its theme instead of flashing the stylesheet's default before settings arrive
         await core.AddScriptToExecuteOnDocumentCreatedAsync($"window.__hubAppearance = {_bridge.AppearanceJson()};");
         core.SetVirtualHostNameToFolderMapping("hub.app", Path.Combine(AppContext.BaseDirectory, "wwwroot"), CoreWebView2HostResourceAccessKind.DenyCors);
+        // Only Hub's own page may talk to the bridge, and the window never leaves it: links open in the browser.
+        core.NavigationStarting += (_, e) =>
+        {
+            if (IsHubPage(e.Uri)) return;
+            e.Cancel = true;
+            OpenInBrowser(e.Uri);
+        };
+        core.FrameNavigationStarting += (_, e) => e.Cancel = !IsHubPage(e.Uri);
+        core.NewWindowRequested += (_, e) =>
+        {
+            e.Handled = true;
+            OpenInBrowser(e.Uri);
+        };
         core.WebMessageReceived += async (_, e) =>
         {
+            if (!IsHubPage(e.Source)) return;
             var reply = await _bridge.HandleAsync(e.WebMessageAsJson);
             if (!IsDisposed) core.PostWebMessageAsJson(reply);
         };
         core.Navigate("https://hub.app/index.html");
+    }
+
+    static bool IsHubPage(string uri) => uri.StartsWith("https://hub.app/", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Opens GitHub links (the backup token page) in the user's browser; anything else is ignored.</summary>
+    static void OpenInBrowser(string uri)
+    {
+        if (Uri.TryCreate(uri, UriKind.Absolute, out var u) && u.Scheme == Uri.UriSchemeHttps && u.Host == "github.com")
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(u.AbsoluteUri) { UseShellExecute = true });
     }
 
     /// <summary>Dev aid (`Hub.exe --shots dir`): renders each page to PNG through WebView2's own capture.</summary>

@@ -252,7 +252,9 @@
         <div class="chatmix"><span>Game</span><input type="range" id="chatMix" min="-100" max="100" step="1"><span>Chat</span></div>
       </div>
       <div class="card" id="ioCard">
-        <div class="row between"><div class="card-title">Output &amp; mic</div><span class="muted">Where Hub plays the mix, and which mic Windows uses</span></div>
+        <div class="row between"><div class="card-title">Output &amp; mic</div>
+          <span class="row io-head"><span class="muted">Where Hub plays the mix, and which mic Windows uses</span>
+            <button class="btn small" id="openProfiles" title="Each output device keeps its own profiles">Profiles</button></span></div>
         <div class="io-grid">
           <label class="field">Output device<select id="ioOutput"></select></label>
           <label class="field">Microphone<select id="ioMic"></select></label>
@@ -318,6 +320,10 @@
             <div class="segmented" id="headsetColor"></div></div>
         </div>
       </div>
+      <div class="card narrow" id="backup">
+        <div class="row between"><div class="card-title">backup</div><span class="muted mono bk-repo" id="bkRepo"></span></div>
+        <div id="bkBody"></div>
+      </div>
       <p class="hint about" id="about"></p>
     </section>
   </main>
@@ -367,6 +373,36 @@
       </footer>
     </form>
   </dialog>
+
+  <dialog class="adv profiles" id="profiles">
+    <div class="adv-body">
+      <header class="adv-head">
+        <div><div class="muted">Audio</div><h2>Profiles</h2></div>
+        <button type="button" class="icon-btn" data-close title="Close">✕</button>
+      </header>
+      <div class="settings-sub">devices</div>
+      <div id="profDevices"></div>
+      <p class="hint">A device you pick for the first time starts as a copy of the default. Change a device's profiles on the channel cards while it's the output.</p>
+      <div class="settings-sub">your profiles</div>
+      <div id="profMine"></div>
+    </div>
+  </dialog>
+  <dialog class="adv restore" id="restore">
+    <div class="adv-body">
+      <header class="adv-head">
+        <div><div class="muted">Backup</div><h2>Restore</h2></div>
+        <button type="button" class="icon-btn" data-close title="Close">✕</button>
+      </header>
+      <div id="rsList"></div>
+      <div class="rs-diff" id="rsDiff"></div>
+      <p class="hint">Your current settings are saved on this PC first, so you can undo the restore. Mouse settings are written to the mouse.</p>
+      <div class="row end">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="button" class="btn primary" id="rsGo" disabled>Restore this backup</button>
+      </div>
+    </div>
+  </dialog>
+  <input type="file" id="apoFile" accept=".txt,text/plain" hidden>
 
   <div class="popover" id="popover"></div>
   <div class="toast" id="toast"></div>

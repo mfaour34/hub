@@ -12,6 +12,8 @@ public sealed class TrayContext : ApplicationContext
     readonly SystemInfo.DeviceWatcher _usb;
     readonly System.Windows.Forms.Timer _audioRetry;
     readonly Bridge _bridge;
+    readonly BackupService _backup;
+    readonly System.Windows.Forms.Timer _backupReminder;
     readonly NotifyIcon _tray;
     readonly Icon _appIcon;
     readonly Bitmap _logo16, _logo32;
@@ -32,7 +34,8 @@ public sealed class TrayContext : ApplicationContext
         _audio = new AudioService(_settings);
         _stability = new SystemInfo.StabilityWatcher(Path.Combine(AppSettings.DataDir, "stability.jsonl"));
         _usb = new SystemInfo.DeviceWatcher(Path.Combine(AppSettings.DataDir, "devices.jsonl"), KnownKind);
-        _bridge = new Bridge(_devices, _audio, _settings, _stability, _usb);
+        _backup = new BackupService(_settings, _audio, _devices);
+        _bridge = new Bridge(_devices, _audio, _settings, _stability, _usb, _backup);
         _devices.Changed += Refresh;
         _devices.Notice += msg => _tray!.ShowBalloonTip(5000, "Hub", msg, ToolTipIcon.Warning);
 
@@ -64,6 +67,15 @@ public sealed class TrayContext : ApplicationContext
         _audioRetry.Start();
         // logging off or shutting down: give Windows its output device back, Hub sets the sink again at next start
         Microsoft.Win32.SystemEvents.SessionEnding += (_, _) => Native.Sta.Run(_audio.Shutdown).Wait(3000);
+
+        // backup reminders: checked every half hour, shown at most once a day
+        _backupReminder = new System.Windows.Forms.Timer { Interval = 30 * 60 * 1000 };
+        _backupReminder.Tick += (_, _) =>
+        {
+            if (_backup.DueReminder() is { } text) _tray.ShowBalloonTip(8000, "Hub backup", text, ToolTipIcon.Info);
+        };
+        _backupReminder.Start();
+        _tray.BalloonTipClicked += (_, _) => ShowWindow();
 
         var vendors = DeviceManager.RunningVendorApps();
         if (vendors.Count > 0)
@@ -166,6 +178,7 @@ public sealed class TrayContext : ApplicationContext
         _tray.Dispose();
         _window?.Close();
         _audioRetry.Dispose();
+        _backupReminder.Dispose();
         _devices.Dispose();
         _stability.Dispose();
         _usb.Dispose();
